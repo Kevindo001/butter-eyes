@@ -1,0 +1,14 @@
+# Starts the drive server when the Jetson boots (user service: no sudo needed, lingering is on).
+#   install: cp user-units/*.service ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user enable --now butter-drive butter-camera
+[Unit]
+Description=Butter drive server (motors, speaker)
+After=network.target
+
+[Service]
+WorkingDirectory=%h/Projects/butter-drive
+ExecStart=%h/Projects/butter/butter_env/bin/python3 server.py --port 8770 --speed 0.05
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
