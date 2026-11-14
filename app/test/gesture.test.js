@@ -247,13 +247,14 @@ test('drive by looking: LOOK left/center/right from gaze; eyebrows up = BROW_STA
 });
 
 // ------------------------------------------------------------------ quick calibration (what the app uses)
-function quickSetup(persona, seed, { reactMs = 350 } = {}) {
+function quickSetup(persona, seed, { reactMs = 350, winks = true } = {}) {
   const sim = makeSim({ seed, persona });
   const fr = (a) => a.map((x) => ({ t: x.t, ...x.f }));
   sim.run([[800, {}]]);
   const relaxed = fr(sim.run([[8000, {}]]));
   const closed = fr([...sim.run([[reactMs, {}]]), ...sim.run([[3500 - reactMs, { lidL: 1, lidR: 1 }]])]);
-  const out = quickCalibration({ relaxed, closed });
+  const step = (g) => (g ? fr([...sim.run([[reactMs, {}]]), ...sim.run([[2500 - reactMs, g]]), ...sim.run([[600, {}]])]) : undefined);
+  const out = quickCalibration({ relaxed, closed, ...(winks ? { winkL: step({ lidL: 1 }), winkR: step({ lidR: 1 }) } : {}) });
   sim.run([[1200, {}]]);
   return { sim, ...out };
 }

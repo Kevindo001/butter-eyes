@@ -100,6 +100,10 @@ export class FaceTracker {
         gaze: ((bs.eyeLookOutLeft + bs.eyeLookInRight) - (bs.eyeLookInLeft + bs.eyeLookOutRight)) / 2,
         // head turn: where the nose tip sits between the two sides of the face (0 = straight at the camera)
         yaw: (P[1].x - (P[234].x + P[454].x) / 2) / Math.max(1e-6, Math.abs(P[454].x - P[234].x)) },
+      // readings shown on the Dev tab (frown / squint experiments); not used for control yet
+      dev: { browDown: (bs.browDownLeft + bs.browDownRight) / 2, eyeSquint: (bs.eyeSquintLeft + bs.eyeSquintRight) / 2,
+        cheekSquint: (bs.cheekSquintLeft + bs.cheekSquintRight) / 2, noseSneer: (bs.noseSneerLeft + bs.noseSneerRight) / 2,
+        browUp: (bs.browInnerUp + bs.browOuterUpLeft + bs.browOuterUpRight) / 3, blink: (bs.eyeBlinkLeft + bs.eyeBlinkRight) / 2 },
       eyePx: eyeWidthPx(P, vw),
       glare: this.glare,
       multiple: lk.multiple,

@@ -204,12 +204,12 @@ try {
     await page.evaluate(() => { window.__butter.screens.home.i = 2; window.__butter.screens.home.render(); });
     await inject('DOUBLE_BLINK');
     assert(await screen() === 'settings', 'settings not open');
-    await inject('DOUBLE_BLINK'); // row 0: drive speed 5% -> 10%
-    await until(() => S('S.settings.driveSpeed === 0.1'), 3000, 'setting change');
-    assert(JSON.parse(fs.readFileSync(storePath, 'utf8')).settings.driveSpeed === 0.1, 'not persisted');
+    await inject('DOUBLE_BLINK'); // row 0: drive speed 10% -> 20%
+    await until(() => S('S.settings.driveSpeed === 0.2'), 3000, 'setting change');
+    assert(JSON.parse(fs.readFileSync(storePath, 'utf8')).settings.driveSpeed === 0.2, 'not persisted');
     assert((await page.content()).includes('Practice gestures'), 'no practice row');
     await shot('07-settings');
-    await page.evaluate(() => window.butterApi.saveSettings({ driveSpeed: 0.05 }).then((s) => { window.__butter.S.settings = s; }));
+    await page.evaluate(() => window.butterApi.saveSettings({ driveSpeed: 0.1 }).then((s) => { window.__butter.S.settings = s; }));
     await inject('BOTH_CLOSED');
   });
 
@@ -259,7 +259,28 @@ try {
     assert(await S('screens.drive.dir') === 'forward', 'a wink changed direction in look mode');
     await inject('LONG_BLINK');
     assert(await S('screens.drive.dir') === 'stop', 'long blink did not stop');
+    await sleep(3300); // a fresh eye-close, not the one that just stopped it
+    await inject('BOTH_CLOSED');
+    assert(await screen() === 'home', 'closing both eyes did not exit look drive');
     await page.evaluate(() => window.butterApi.saveSettings({ driveMode: 'blink' }).then((s) => { window.__butter.S.settings = s; window.__butter.go('home'); }));
+  });
+
+  await check('dev tab: clicking Dev shows live rows for frown / squint; snake fills the window', async () => {
+    await page.click('#devBtn');
+    assert(await screen() === 'dev', 'dev tab did not open');
+    assert(await page.locator('.devrow').count() === 6, 'dev rows');
+    await sleep(2600);
+    const txt = await page.locator('.devrow[data-k="browDown"] small').textContent();
+    assert(/neutral \d/.test(txt), 'no neutral level measured: ' + txt);
+    await shot('11-dev');
+    await page.click('#devBtn');
+    assert(await screen() === 'home', 'dev tab did not close');
+    await page.evaluate(() => window.__butter.go('snake'));
+    const fill = await page.evaluate(() => { const c = document.querySelector('#snake').getBoundingClientRect(), m = document.querySelector('main').getBoundingClientRect(); return [c.width / m.width, c.height / m.height]; });
+    assert(fill[0] > 0.9 && fill[1] > 0.85, 'snake not full screen: ' + fill);
+    await shot('12-snake-full');
+    await page.evaluate(() => window.__butter.go('home'));
+    return fill.map((x) => x.toFixed(2)).join(' x ');
   });
 
   await check('talk: fake mic voice -> VAD (audio thread) -> ElevenLabs Scribe -> transcript', async () => {

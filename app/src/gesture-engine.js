@@ -126,7 +126,10 @@ export class GestureEngine {
     const lopsided = (side) => {
       const e = side === 'left' ? 'L' : 'R', o = side === 'left' ? 'R' : 'L';
       const held = this.wink?.side === side; // easier to stay in a wink than to start one
-      return c[e] > p.closeT[e] - (held ? 0.2 : 0.1) && c[o] < p.otherMax[side] && c[e] - c[o] >= p.asymMin - (held ? 0.08 : 0);
+      // per side when the person's own winks were measured in calibration (one side is often weaker)
+      const asym = typeof p.asymMin === 'object' ? p.asymMin[side] : p.asymMin;
+      const on = p.winkOn?.[side] ?? p.closeT[e] - 0.1;
+      return c[e] > on - (held ? 0.1 : 0) && c[o] < p.otherMax[side] && c[e] - c[o] >= asym - (held ? Math.min(0.08, asym / 3) : 0);
     };
     let cand = lopsided('left') ? 'left' : lopsided('right') ? 'right' : null;
     // once both eyes are closed (the stop gesture), a noisy lopsided frame or two must not break it

@@ -252,3 +252,18 @@ canvas#snake { background: var(--linen); border-radius: var(--r); border: 3px so
 .looks > div.on { background: rgba(40, 170, 90, .75); border-color: #7dffb0; }
 .drivehint { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 16px; background: rgba(0, 0, 0, .55); color: #fff; font-size: 16px; text-align: center; z-index: 6; }
 .drivehint #ctlState { color: #ffd54a; font-weight: 800; margin-left: 10px; }
+
+/* ---------- snake, full window */
+.snakefull { padding: 4px; position: relative; display: grid; place-items: center; }
+.snakefull canvas#snake { max-width: 100%; max-height: 100%; }
+.snakescore { position: absolute; top: 14px; left: 18px; font-weight: 800; font-size: 26px; background: rgba(255,255,255,.85); padding: 4px 12px; }
+.snakehint { position: absolute; bottom: 12px; left: 0; right: 0; text-align: center; font-size: 15px; color: var(--ink-2); pointer-events: none; }
+/* ---------- dev tab */
+.devbtn { margin-left: auto; margin-right: 14px; padding: 6px 14px; font: inherit; font-weight: 700; font-size: 14px; background: #fff; border: 2px solid var(--ink-3); color: var(--ink-2); cursor: pointer; }
+.devbtn:hover { border-color: var(--ink); color: var(--ink); }
+.devrows { flex: 1; display: grid; gap: 10px; align-content: start; }
+.devrow { display: grid; grid-template-columns: 300px 1fr 80px; gap: 16px; align-items: center; background: #fff; border: 3px solid var(--line, #ddd); padding: 8px 16px; }
+.devrow b { display: block; font-size: 18px; } .devrow small { color: var(--ink-3); font-size: 13px; }
+.devrow canvas { width: 100%; height: 70px; background: #faf9f7; }
+.devrow .devnum { font-size: 28px; font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
+.devrow.on { border-color: var(--go); background: var(--go-soft); }

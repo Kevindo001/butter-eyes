@@ -235,7 +235,7 @@ screens.drive = {
       return true;
     }
     if (ev.type === 'BOTH_CLOSED') {
-      if (performance.now() - (this.quickStopAt || 0) < 2600) { this.quickStopAt = 0; return true; } // same eye-close that already stopped it
+      if (performance.now() - (this.quickStopAt || 0) < 3100) { this.quickStopAt = 0; return true; } // same eye-close that already stopped it
       if (this.dir !== 'stop' || this.cruise || performance.now() < this.confirmUntil) this.stop('Stopped');
       else go('home');
       return true;
@@ -379,14 +379,20 @@ async function playAudio(r, text) {
 // ---------------------------------------------------------------- snake
 screens.snake = {
   enter() {
-    main.innerHTML = `<section class="screen"><div><h1>Snake</h1><h2 id="score">Score 0</h2></div>
-      <div class="snakewrap"><canvas id="snake" width="840" height="560"></canvas></div>
-      ${hintRow('snake', { turnLeft: 'turn left', turnRight: 'turn right', pause: 'pause / restart', back: 'home' })}</section>`;
-    this.game = new Snake($('#snake'), (s) => { $('#score').textContent = `Score ${s}`; });
+    main.innerHTML = `<section class="screen snakefull"><canvas id="snake"></canvas><div class="snakescore" id="score">Score 0</div>
+      <div class="snakehint">Wink left / right to turn. Double blink: pause. Both eyes 3 s: home.</div></section>`;
+    // fill the whole window with square cells
+    const box = main.getBoundingClientRect(), cell = 46;
+    const cols = Math.max(12, Math.floor((box.width - 8) / cell)), rows = Math.max(9, Math.floor((box.height - 8) / cell));
+    const cv = $('#snake'); cv.width = cols * cell; cv.height = rows * cell;
+    this.game = new Snake(cv, (s) => { $('#score').textContent = `Score ${s}`; }, { cols, rows });
     this.game.start();
+    this.rec = { t0: performance.now(), events: [], frames: [] }; // winks are being tuned on Snake: keep the readings
+    this.off = S.tracker?.onFrame((f, t) => { if (this.rec.frames.length < 5400) this.rec.frames.push(f.face ? { t, face: true, raw: f.raw } : { t, face: false }); });
   },
-  exit() { this.game?.stop(); },
+  exit() { this.game?.stop(); this.off?.(); api.saveDebug('snake', { cal: S.engine?.cal?.params, ...this.rec }); },
   on(ev) {
+    if (this.rec.events.length < 3000) this.rec.events.push({ t: Math.round(ev.t), type: ev.type });
     const a = actionFor('snake', ev.type);
     const L = { up: 'left', left: 'down', down: 'right', right: 'up' }, R = { up: 'right', right: 'down', down: 'left', left: 'up' };
     if (a === 'turnLeft') { this.game.turn(L[this.game.dir]); return true; }
@@ -395,6 +401,60 @@ screens.snake = {
     return false;
   },
 };
+
+// ---------------------------------------------------------------- dev: watch raw face readings live
+// For trying out new signals (frown / squint) before they control anything. Click "Dev" in the top bar.
+const DEV = [
+  { k: 'browDown', label: 'Frown (eyebrows down / together)', color: '#d1495b' },
+  { k: 'eyeSquint', label: 'Eye squint', color: '#e09f3e' },
+  { k: 'cheekSquint', label: 'Cheek squint', color: '#8d6a9f' },
+  { k: 'noseSneer', label: 'Nose scrunch', color: '#577590' },
+  { k: 'browUp', label: 'Eyebrows up (for comparison)', color: '#2a9d8f' },
+  { k: 'blink', label: 'Eyes closed (for comparison)', color: '#555' },
+];
+screens.dev = {
+  enter() {
+    this.hist = []; this.rest = null; this.peak = {}; this.t0 = performance.now(); this.count = {}; this.active = {};
+    main.innerHTML = `<section class="screen"><div><h1>Dev: face readings</h1>
+      <h2>Keep a neutral face for 2 seconds, then try a frown or a squint. A row turns green when it rises clearly above your neutral level.</h2></div>
+      <div class="devrows">${DEV.map((d) => `<div class="devrow" data-k="${d.k}"><div class="devname"><b>${d.label}</b><small></small></div><canvas width="900" height="70"></canvas><div class="devnum"></div></div>`).join('')}</div>
+      <div class="hint"><span><kbd>R</kbd>reset neutral</span><span><kbd>Esc</kbd>home</span><span>Readings are saved to app/debug/dev.json when you leave</span></div></section>`;
+    this.off = S.tracker?.onFrame((f, t) => this.frame(f, t));
+    this.key = (e) => { if (e.key === 'r') { this.rest = null; this.t0 = performance.now(); this.hist = []; this.peak = {}; this.count = {}; } };
+    addEventListener('keydown', this.key);
+  },
+  exit() { this.off?.(); removeEventListener('keydown', this.key); api.saveDebug('dev', { rest: this.rest, peak: this.peak, count: this.count, frames: this.hist }); },
+  frame(f, t) {
+    if (!f.face || !f.dev) return;
+    this.hist.push({ t: Math.round(t - this.t0), ...Object.fromEntries(DEV.map((d) => [d.k, +f.dev[d.k].toFixed(3)])) });
+    if (this.hist.length > 9000) this.hist.shift();
+    if (!this.rest && t - this.t0 > 2000) { // neutral level and its normal wobble, from the first 2 s
+      this.rest = {};
+      for (const d of DEV) { const v = this.hist.map((h) => h[d.k]).sort((a, b) => a - b); this.rest[d.k] = { m: v[Math.floor(v.length / 2)], hi: v[Math.floor(v.length * 0.95)] }; }
+    }
+    const recent = this.hist.slice(-300);
+    for (const d of DEV) {
+      const row = main.querySelector(`.devrow[data-k="${d.k}"]`); if (!row) return;
+      const v = f.dev[d.k], r = this.rest?.[d.k];
+      this.peak[d.k] = Math.max(this.peak[d.k] || 0, v);
+      // "clearly above neutral": more than 0.15 over the neutral level and over its normal wobble
+      const thr = r ? Math.max(r.m + 0.15, r.hi + 0.1) : null, on = thr !== null && v > thr;
+      if (on && !this.active[d.k]) this.count[d.k] = (this.count[d.k] || 0) + 1;
+      this.active[d.k] = on;
+      row.classList.toggle('on', on);
+      row.querySelector('.devnum').textContent = v.toFixed(2);
+      row.querySelector('small').textContent = r ? `neutral ${r.m.toFixed(2)} · peak ${this.peak[d.k].toFixed(2)} · seen ${this.count[d.k] || 0}x` : 'measuring neutral…';
+      const cv = row.querySelector('canvas'), ctx = cv.getContext('2d');
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      if (thr !== null) { ctx.strokeStyle = '#bbb'; ctx.setLineDash([6, 6]); ctx.beginPath(); ctx.moveTo(0, cv.height * (1 - thr)); ctx.lineTo(cv.width, cv.height * (1 - thr)); ctx.stroke(); ctx.setLineDash([]); }
+      ctx.strokeStyle = d.color; ctx.lineWidth = 3; ctx.beginPath();
+      recent.forEach((h, i) => { const x = (i / 299) * cv.width, y = cv.height * (1 - Math.min(1, h[d.k])); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      ctx.stroke();
+    }
+  },
+  on(ev) { return ev.type !== 'BOTH_CLOSED'; }, // gestures do nothing here, except closing both eyes to leave
+};
+document.getElementById('devBtn')?.addEventListener('click', () => go(S.screenName === 'dev' ? 'home' : 'dev'));
 
 // ---------------------------------------------------------------- settings
 screens.settings = {
@@ -503,7 +563,7 @@ screens.calibrate = {
         const issue = !f.face ? (f.multiple ? 'Only one person in view, please' : 'Sit in front of the camera')
           : f.eyePx < 22 ? 'Move a little closer to the screen'
           : f.glare > 0.06 ? 'Light is reflecting off your glasses: tilt the screen down a little' : '';
-        this.set(issue || 'Ready?', issue ? '' : 'Calibration takes about 25 seconds');
+        this.set(issue || 'Ready?', issue ? '' : 'Calibration takes about 40 seconds');
         good = issue ? 0 : good + 1;
         if (good > 15 || this.cancelled || (performance.now() - t0 > 20000 * SPEED && f.face)) { off(); res(); }
       });
@@ -540,11 +600,23 @@ screens.calibrate = {
     this.circle(50, 42, QCAL.BROW_MS);
     await this.collect(QCAL.BROW_MS, samples.brow);
     beep(880, 500);
+    await sleep(500 * SPEED);
+    // ---- 4. winks: each side, because most people have a weaker side
+    for (const [key, side] of [['winkL', 'left'], ['winkR', 'right']]) {
+      samples[key] = [];
+      this.set(`Wink your ${side} eye`, 'Keep it closed until the beep');
+      await speak(`Now close only your ${side} eye, and keep it closed until the beep.`);
+      if (this.cancelled) return;
+      this.circle(50, 42, QCAL.WINK_MS);
+      await this.collect(QCAL.WINK_MS, samples[key]);
+      beep(880, 400);
+      await sleep(600 * SPEED);
+    }
     this.set('Done', '');
     await sleep(400 * SPEED);
 
     const { cal, report } = quickCalibration(samples);
-    api.saveDebug('calibration', { report, samples: { relaxed: samples.relaxed, closed: samples.closed, brow: samples.brow } });
+    api.saveDebug('calibration', { report, samples });
     S.calibrating = false;
     if (!cal) {
       this.circle(50, 42);

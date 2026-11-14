@@ -230,7 +230,7 @@ export function fitCalibration(samples) {
 // Thresholds are standard values on the person's own open..closed scale. The practice screen then
 // shows which gestures actually register.
 // ============================================================================
-export const QUICK = { RELAXED_MS: 8000, CLOSED_MS: 3500, BROW_MS: 2500 };
+export const QUICK = { RELAXED_MS: 8000, CLOSED_MS: 3500, BROW_MS: 2500, WINK_MS: 2500 };
 
 export function quickCalibration(samples) {
   const report = { ok: false, notes: [], warnings: [] };
@@ -267,6 +267,25 @@ export function quickCalibration(samples) {
   const P = structuredClone(DEFAULT_PARAMS);
   P.otherMax = { left: 0.78, right: 0.78 }; // winks are judged by lopsidedness; the other eye may squint
   P.asymMin = 0.28;
+  // each person's own winks: how lopsided THEIR left and right winks really are (one side is often
+  // much weaker, with the other eye closing most of the way too)
+  report.winks = {};
+  if (samples.winkL?.length || samples.winkR?.length) {
+    P.asymMin = { left: P.asymMin, right: P.asymMin }; P.winkOn = {}; 
+    for (const [side, rows] of [['left', samples.winkL], ['right', samples.winkR]]) {
+      const e = side === 'left' ? 'L' : 'R', o = side === 'left' ? 'R' : 'L';
+      const cs = (rows || []).filter((f) => f.face).map((f) => closure(f.raw, tf)).map((c) => ({ e: c[e], o: c[o], d: c[e] - c[o] }));
+      const top = cs.filter((x) => x.e > 0.3).sort((a, b) => b.d - a.d);
+      const best = top.slice(0, Math.max(1, Math.floor(top.length / 2))); // the clearly-winking half of the step
+      if (best.length < 6) { report.winks[side] = { ok: false, why: 'no wink seen' }; report.notes.push(`We did not see a ${side} wink, so it uses the standard setting.`); continue; }
+      const d = median(best.map((x) => x.d)), lvl = median(best.map((x) => x.e)), other = quantile(best.map((x) => x.o), 0.9);
+      if (d < 0.12) { report.winks[side] = { ok: false, d, why: 'both eyes close together' }; report.notes.push(`Your ${side} wink closes both eyes almost equally, so it may be unreliable.`); P.asymMin[side] = 0.15; continue; }
+      P.asymMin[side] = clamp(0.55 * d, 0.15, 0.35);
+      P.winkOn[side] = clamp(0.7 * lvl, 0.3, P.closeT[e] - 0.1);
+      P.otherMax[side] = clamp(other + 0.15, 0.6, 0.9);
+      report.winks[side] = { ok: true, d, level: lvl, other };
+    }
+  }
   // natural blink length -> how slow a "slow double blink" must be
   const ser = relaxed.map((f) => { const c = closure(f.raw, tf); return { t: f.t, cL: c.L, cR: c.R }; });
   const nat = closureIntervals(ser, (x) => Math.min(x.cL, x.cR), 0.55, 0.3);
@@ -298,6 +317,6 @@ export function quickCalibration(samples) {
     cal.signature = { mean: m, sd };
   }
   report.ok = true;
-  report.stats = { openB: bMid, closedB: hi, lidOpen: rOpen, lidClosed: rMin, gaze, naturalBlinks: nat.length, slowBlinkMinMs: Math.round(P.dbl.closeMinMs), closedMs: Math.round(closedMs) };
+  report.stats = { winks: report.winks, asymMin: P.asymMin, winkOn: P.winkOn, openB: bMid, closedB: hi, lidOpen: rOpen, lidClosed: rMin, gaze, naturalBlinks: nat.length, slowBlinkMinMs: Math.round(P.dbl.closeMinMs), closedMs: Math.round(closedMs) };
   return { cal, report };
 }

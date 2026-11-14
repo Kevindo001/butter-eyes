@@ -25,7 +25,7 @@ const DEFAULT_SETTINGS = {
   voiceOut: 'laptop',       // laptop | butter | both
   navWith: 'brow',          // menus: brow = quick eyebrow raise moves on | wink = winks move
   driveMode: 'look',        // look = eyes pick direction, eyebrows move | blink = double blink / winks
-  driveSpeed: 0.05,         // motor power 0.05-1.0 (0.05 = crawl)
+  driveSpeed: 0.1,          // motor power 0.05-1.0
   voiceId: '',
   persona: '',
   cameraId: '',
@@ -66,6 +66,7 @@ async function initServices() {
     url: store.settings.butterUrl,
     onStatus: (s) => win?.webContents.send('butter:status', s),
   });
+  if (!store.settings.speedV4) { store.settings.driveSpeed = 0.1; store.settings.speedV4 = true; store.settings.speedV3 = true; } // team: back up to 10%
   if (!store.settings.speedV3) { store.settings.driveSpeed = 0.05; store.settings.speedV3 = true; store.voiceExamples = []; } // one-time: team asked for 5% and a clean Talk memory
   butter.setSpeed(store.settings.driveSpeed);
   log('services: llm', !!process.env.DEEPSEEK_API_KEY, 'speech', speech.enabled, 'butter', store.settings.butterUrl);
