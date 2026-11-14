@@ -62,6 +62,8 @@ const LABEL = { BROW_TAP: 'Eyebrow raise', BROW_SELECT: 'Eyebrow hold', BROW_HOL
 function dispatch(ev) {
   if (S.calibrating && ev.src !== 'test') return;
   if (ev.type === 'BROW_HOLD' && S.screenName === 'drive' && lookDrive() && ev.src !== 'key') return; // eyebrows are the throttle there
+  // ...so in that mode a slow double blink is what turns eye control off and on (nothing else uses it there)
+  if (ev.type === 'DOUBLE_BLINK' && S.screenName === 'drive' && lookDrive()) { setControl(!S.control); TONES[S.control ? 'on' : 'off'](); pulse(); return; }
   if (ev.type === 'BROW_HOLD' && S.screenName !== 'practice') { setControl(!S.control); TONES[S.control ? 'on' : 'off'](); pulse(); return; }
   // eye control off: nothing fires except the safety stop and status events
   if (!S.control && ev.src !== 'key' && !['BOTH_CLOSED', 'LONG_BLINK', 'FACE_LOST', 'FACE_FOUND', 'CALIBRATION_DRIFT'].includes(ev.type)) return;
@@ -80,7 +82,7 @@ function setControl(on) {
   if (!on && S.screenName === 'drive') screens.drive.stop();
   paintPills();
   if (S.screenName === 'drive') screens.drive.paint();
-  toast(on ? 'Eye control on' : 'Eye control off: blink freely. Raise your eyebrows 4 s to turn it back on.', 3200);
+  toast(on ? 'Eye control on' : S.screenName === 'drive' && lookDrive() ? 'Eye control off. Slow double blink to turn it back on.' : 'Eye control off: blink freely. Raise your eyebrows 4 s to turn it back on.', 3200);
 }
 
 // keyboard = caregiver / demo backup, same gestures
@@ -117,7 +119,7 @@ function go(name, arg) {
   S.screen.enter?.(arg);
 }
 // menus are moved through by eyebrow raise or by winks (Settings > Navigate with)
-function syncNav() { setNav(S.settings?.navWith); if (S.engine) S.engine.browNav = browMenus(S.screenName); }
+function syncNav() { setNav(S.settings?.navWith); if (S.engine) S.engine.browNav = browMenus(S.screenName) || (S.screenName === 'drive' && !lookDrive()); }
 const enabled = () => S.engine?.p?.enabled || {};
 const hintRow = (screen, labels) => `<div class="hint">${hints(screen, labels, enabled()).map(([g, a]) => `<span><kbd>${esc(g)}</kbd>${esc(a)}</span>`).join('')}</div>`;
 
@@ -183,7 +185,7 @@ screens.drive = {
         ${lookDrive() ? `<div class="looks" id="looks">
           <div data-l="left">${ICONS.left}<span>Left</span></div><div data-l="center">${ICONS.up}<span>Forward</span></div><div data-l="right">${ICONS.right}<span>Right</span></div>
         </div>
-        <div class="drivehint"><b>Look</b> at a direction, <b>raise eyebrows</b> to move, relax to stop. <b>Both eyes 3 s</b>: exit. <span id="ctlState"></span></div>` : ''}
+        <div class="drivehint"><b>Look</b> at a direction, <b>raise eyebrows</b> to move, relax to stop. <b>Slow double blink</b>: eye control off / on. <b>Both eyes 3 s</b>: exit. <span id="ctlState"></span></div>` : ''}
       </div>`;
     main.innerHTML = lookDrive() ? `<section class="screen drivescreen wide">${feed}</section>` : `<section class="screen drivescreen">
       <aside class="sidebar">
@@ -192,7 +194,7 @@ screens.drive = {
           <span>${canBrow ? 'Raise eyebrows 4 s to switch' : 'Press B to switch'}</span>
         </div>
         <div class="sidecard dim">
-          <small>Mode</small><b>Blink drive</b>
+          <small>Mode</small><b>Blink Drive</b>
           <span>Change in Settings</span>
         </div>
         <div class="dpad" id="dpad">
@@ -205,6 +207,7 @@ screens.drive = {
           <b>Double blink</b> or <b>long blink</b>: stop<br>
           <b>Close left eye</b>: turn right<br>
           <b>Close right eye</b>: turn left<br>
+          <b>Quick eyebrow raise</b>: back up 3 s<br>
           <b>Both eyes 3 s</b>: stop, exit
         </div>
       </aside>
@@ -226,7 +229,7 @@ screens.drive = {
     const mid = $('#mid'); if (mid) mid.textContent = this.cruise ? 'cruise' : '';
     const want = { left: 'left', right: 'right', forward: 'center' }[this.dir];
     main.querySelectorAll('#looks [data-l]').forEach((el) => { el.classList.toggle('look', el.dataset.l === this.look); el.classList.toggle('on', el.dataset.l === want); });
-    const cs = $('#ctlState'); if (cs) { cs.textContent = lookDrive() ? (S.control ? '' : 'Eye control is OFF (press B)') : S.control ? 'On' : 'Off'; $('#ctlCard')?.classList.toggle('off', !S.control); }
+    const cs = $('#ctlState'); if (cs) { cs.textContent = lookDrive() ? (S.control ? '' : 'Eye control is OFF: slow double blink to turn on') : S.control ? 'On' : 'Off'; $('#ctlCard')?.classList.toggle('off', !S.control); }
   },
   on(ev) {
     if (ev.type === 'FACE_LOST') { this.stop('Face lost: stopped'); return true; }
@@ -254,6 +257,12 @@ screens.drive = {
       if (performance.now() < this.confirmUntil) { this.confirmUntil = 0; this.cruise = true; this.set('forward'); return true; }
       this.confirmUntil = performance.now() + 3000; // costly action: confirm
       this.paint(); setTimeout(() => this.paint(), 3050);
+      return true;
+    }
+    if (a === 'reverse') { // backs up for at most 3 s per raise: you can't see behind you
+      if (this.dir !== 'stop' || this.cruise) { this.stop(); return true; }
+      clearTimeout(this.timer); this.set('backward');
+      this.timer = setTimeout(() => { if (this.dir === 'backward') this.set('stop'); }, 3000);
       return true;
     }
     if (a === 'nudgeLeft' || a === 'nudgeRight') { this.nudge(a === 'nudgeLeft' ? 'left' : 'right'); return true; }
@@ -463,7 +472,7 @@ screens.settings = {
     const s = S.settings;
     return [
       { k: 'driveSpeed', label: 'Drive speed', vals: [{ v: 0.05, l: '5%' }, { v: 0.1, l: '10%' }, { v: 0.2, l: '20%' }] },
-      { k: 'driveMode', label: 'Drive with', vals: [{ v: 'look', l: 'Look + eyebrows' }, { v: 'blink', l: 'Blinks and winks' }] },
+      { k: 'driveMode', label: 'Drive with', vals: [{ v: 'look', l: 'Look Drive (look + eyebrows)' }, { v: 'blink', l: 'Blink Drive' }] },
       { k: 'navWith', label: 'Navigate with', vals: [{ v: 'brow', l: 'Eyebrows (quick raise = next)' }, { v: 'wink', l: 'Winks (left / right)' }] },
       { k: 'voiceOut', label: 'Voice comes out of', vals: [{ v: 'laptop', l: 'Laptop' }, { v: 'butter', l: 'Butter' }, { v: 'both', l: 'Both' }] },
       { k: 'recal', label: 'Recalibrate eyes', action: () => go('calibrate') },

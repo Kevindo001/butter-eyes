@@ -240,6 +240,18 @@ try {
     await page.evaluate(() => window.__butter.go('home'));
   });
 
+  await check('Blink Drive: quick eyebrow raise backs up, stops by itself after 3 s, and a double blink stops it early', async () => {
+    await page.evaluate(() => window.__butter.go('drive'));
+    await inject('BROW_TAP');
+    assert(await S('screens.drive.dir') === 'backward', 'did not back up');
+    await inject('DOUBLE_BLINK');
+    assert(await S('screens.drive.dir') === 'stop', 'double blink did not stop reverse');
+    await sleep(600); await inject('BROW_TAP');
+    assert(await S('screens.drive.dir') === 'backward', 'did not back up again');
+    await until(() => S("screens.drive.dir === 'stop'"), 4000, 'auto stop after 3 s');
+    await page.evaluate(() => window.__butter.go('home'));
+  });
+
   await check('drive (look + eyebrows): look left + eyebrows up turns left, eyebrows down stops, forward when looking ahead; 4 s eyebrows does not switch control off', async () => {
     await page.evaluate(() => window.butterApi.saveSettings({ driveMode: 'look' }).then((s) => { window.__butter.S.settings = s; window.__butter.go('drive'); }));
     assert(await page.locator('#looks [data-l]').count() === 3, 'look targets missing');
@@ -259,6 +271,13 @@ try {
     assert(await S('screens.drive.dir') === 'forward', 'a wink changed direction in look mode');
     await inject('LONG_BLINK');
     assert(await S('screens.drive.dir') === 'stop', 'long blink did not stop');
+    await inject('BROW_START', { look: 'center' });
+    await inject('DOUBLE_BLINK');
+    assert(await S('S.control') === false && await S('screens.drive.dir') === 'stop', 'double blink did not switch eye control off and stop');
+    await inject('BROW_START', { look: 'center' });
+    assert(await S('screens.drive.dir') === 'stop', 'moved with eye control off');
+    await inject('DOUBLE_BLINK');
+    assert(await S('S.control') === true, 'double blink did not switch eye control back on');
     await sleep(3300); // a fresh eye-close, not the one that just stopped it
     await inject('BOTH_CLOSED');
     assert(await screen() === 'home', 'closing both eyes did not exit look drive');
