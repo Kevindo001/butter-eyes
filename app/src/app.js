@@ -119,7 +119,7 @@ function go(name, arg) {
   S.screen.enter?.(arg);
 }
 // menus are moved through by eyebrow raise or by winks (Settings > Navigate with)
-function syncNav() { setNav(S.settings?.navWith); if (S.engine) S.engine.browNav = browMenus(S.screenName) || (S.screenName === 'drive' && !lookDrive()); }
+function syncNav() { setNav(S.settings?.navWith); if (S.engine) S.engine.browNav = browMenus(S.screenName); }
 const enabled = () => S.engine?.p?.enabled || {};
 const hintRow = (screen, labels) => `<div class="hint">${hints(screen, labels, enabled()).map(([g, a]) => `<span><kbd>${esc(g)}</kbd>${esc(a)}</span>`).join('')}</div>`;
 
@@ -207,7 +207,6 @@ screens.drive = {
           <b>Double blink</b> or <b>long blink</b>: stop<br>
           <b>Close left eye</b>: turn right<br>
           <b>Close right eye</b>: turn left<br>
-          <b>Quick eyebrow raise</b>: back up 3 s<br>
           <b>Both eyes 3 s</b>: stop, exit
         </div>
       </aside>
@@ -257,12 +256,6 @@ screens.drive = {
       if (performance.now() < this.confirmUntil) { this.confirmUntil = 0; this.cruise = true; this.set('forward'); return true; }
       this.confirmUntil = performance.now() + 3000; // costly action: confirm
       this.paint(); setTimeout(() => this.paint(), 3050);
-      return true;
-    }
-    if (a === 'reverse') { // backs up for at most 3 s per raise: you can't see behind you
-      if (this.dir !== 'stop' || this.cruise) { this.stop(); return true; }
-      clearTimeout(this.timer); this.set('backward');
-      this.timer = setTimeout(() => { if (this.dir === 'backward') this.set('stop'); }, 3000);
       return true;
     }
     if (a === 'nudgeLeft' || a === 'nudgeRight') { this.nudge(a === 'nudgeLeft' ? 'left' : 'right'); return true; }

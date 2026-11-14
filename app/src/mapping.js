@@ -19,7 +19,6 @@ export const MAP = {
     // closing the left eye turns right, closing the right eye turns left.
     WINK_LEFT: 'nudgeRight', WINK_RIGHT: 'nudgeLeft',   // short turn
     HOLD_LEFT: 'spinRight', HOLD_RIGHT: 'spinLeft',     // turn for as long as the eye stays closed
-    BROW_TAP: 'reverse',             // quick eyebrow raise: back up for up to 3 s (any stop gesture ends it)
   },
   snake: { WINK_LEFT: 'turnLeft', WINK_RIGHT: 'turnRight', DOUBLE_BLINK: 'pause' },
   settings: { BROW_TAP: 'next', WINK_LEFT: 'prev', WINK_RIGHT: 'next', DOUBLE_BLINK: 'activate' },

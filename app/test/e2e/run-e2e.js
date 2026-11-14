@@ -240,15 +240,10 @@ try {
     await page.evaluate(() => window.__butter.go('home'));
   });
 
-  await check('Blink Drive: quick eyebrow raise backs up, stops by itself after 3 s, and a double blink stops it early', async () => {
+  await check('Blink Drive: an eyebrow raise does not move Butter (no reverse)', async () => {
     await page.evaluate(() => window.__butter.go('drive'));
     await inject('BROW_TAP');
-    assert(await S('screens.drive.dir') === 'backward', 'did not back up');
-    await inject('DOUBLE_BLINK');
-    assert(await S('screens.drive.dir') === 'stop', 'double blink did not stop reverse');
-    await sleep(600); await inject('BROW_TAP');
-    assert(await S('screens.drive.dir') === 'backward', 'did not back up again');
-    await until(() => S("screens.drive.dir === 'stop'"), 4000, 'auto stop after 3 s');
+    assert(await S('screens.drive.dir') === 'stop', 'eyebrow raise moved Butter');
     await page.evaluate(() => window.__butter.go('home'));
   });
 
@@ -350,6 +345,7 @@ try {
     await shot('06-quick');
     await inject('DOUBLE_BLINK');
     await until(() => S("screens.talk.convo.some(m => m.who === 'me' && m.text === 'Yes')"), 5000, 'said yes');
+    await sleep(3000); // let the refresh that follows saying "Yes" finish first
     const before = await S('screens.talk.reqId');
     await inject('HOLD_RIGHT', { side: 'right' }); await inject('HOLD_END', { side: 'right' });
     assert(await S('screens.talk.reqId') === before, 'hold right must not re-roll replies any more');
