@@ -10,6 +10,8 @@ case "${1:-start}" in
   *) stop
      # setsid + closed stdin so an ssh session that starts this can return
      setsid nohup "$PY" "$PWD/server.py" --speed "${SPEED:-0.35}" > /tmp/butter-drive.log 2>&1 < /dev/null &
-     [ -e /dev/video0 ] && setsid nohup "$PY" "$PWD/camera_server.py" > /tmp/butter-camera.log 2>&1 < /dev/null &
+     if [ -e /dev/video0 ]; then
+       setsid nohup "$PY" "$PWD/camera_server.py" > /tmp/butter-camera.log 2>&1 < /dev/null &
+     fi
      sleep 1.5; pgrep -af "butter-drive/(server|camera_server).py"; tail -2 /tmp/butter-drive.log ;;
 esac
