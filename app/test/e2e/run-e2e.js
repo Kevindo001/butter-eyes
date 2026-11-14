@@ -1,9 +1,9 @@
 // Full-app end-to-end test: real Electron app + real MediaPipe on a real face image (fake camera)
 // + real microphone pipeline fed with a recorded voice (fake mic) + live ElevenLabs + live DeepSeek
-// + the real butter-drive server in mock-motor mode. Gestures are injected through the same bus
-// the eye tracker uses, and every motor command is checked on the robot side.
+// + the real butter-drive server in mock-motor mode. Eye gestures are injected through the same bus
+// the gesture engine uses, and every motor command is checked on the robot side.
 //
-//   xvfb-run -a node test/e2e/run-e2e.js --video face.y4m --audio them.wav --shots ./shots
+//   xvfb-run -a node test/e2e/run-e2e.js --video face.y4m --audio them.wav --video2 twofaces.y4m --shots ./shots
 import { _electron as electron } from 'playwright-core';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { computeCalibration } from '../../src/calibration.js';
+import { fitCalibration } from '../../src/calibration.js';
 import { makeSim, simCalibrationSamples } from '../sim.js';
 
 const require = createRequire(import.meta.url);
@@ -45,235 +45,256 @@ function startRobot() {
   robot.stderr.on('data', (d) => {
     for (const l of d.toString().split('\n')) {
       const m = l.match(/motors -> (\w+)/); if (m) motorLog.push({ t: Date.now(), dir: m[1] });
-      if (l.includes('say:')) motorLog.push({ t: Date.now(), say: l.split('say: ')[1] });
     }
   });
 }
 const motors = () => motorLog.filter((x) => x.dir).map((x) => x.dir);
 
-// ---------------------------------------------------------------- seed store
+// ---------------------------------------------------------------- seed store: a v3 calibration
 const storePath = path.join(os.tmpdir(), `butter-e2e-${process.pid}.json`);
-const { cal } = computeCalibration(simCalibrationSamples(makeSim({ seed: 3 })));
-fs.writeFileSync(storePath, JSON.stringify({
-  settings: { butterUrl: `ws://127.0.0.1:${PORT}`, butterCameraUrl: 'http://127.0.0.1:1/none', profile: 'eyes', voiceOut: 'laptop', gazeEnter: 0.55, gazeHoldMs: 280 },
+const { cal, report } = fitCalibration(simCalibrationSamples(makeSim({ seed: 3 })));
+cal.report = { gestures: report.gestures };
+const seed = () => fs.writeFileSync(storePath, JSON.stringify({
+  settings: { butterUrl: `ws://127.0.0.1:${PORT}`, butterCameraUrl: 'http://127.0.0.1:1/none', voiceOut: 'laptop' },
   calibration: cal, voiceExamples: [],
 }));
-
+seed();
 startRobot();
 await sleep(800);
 
-const switches = ['--no-sandbox', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'];
-if (arg('video')) switches.push('--use-file-for-fake-video-capture=' + path.resolve(arg('video')));
-if (arg('audio')) switches.push('--use-file-for-fake-audio-capture=' + path.resolve(arg('audio')));
+async function launch(video, audio, extraEnv = {}) {
+  const switches = ['--no-sandbox', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'];
+  if (video) switches.push('--use-file-for-fake-video-capture=' + path.resolve(video));
+  if (audio) switches.push('--use-file-for-fake-audio-capture=' + path.resolve(audio));
+  const app = await electron.launch({
+    executablePath: require('electron'),
+    args: [appDir, ...switches],
+    env: { ...process.env, BUTTER_E2E: '1', BUTTER_STORE: storePath, ...extraEnv },
+    timeout: 60000,
+  });
+  const page = await app.firstWindow();
+  const errors = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('pageerror', (e) => errors.push(String(e)));
+  return { app, page, errors };
+}
+async function close(app) { await Promise.race([app.close().catch(() => {}), sleep(4000)]); try { app.process().kill('SIGKILL'); } catch {} }
 
-const app = await electron.launch({
-  executablePath: require('electron'),
-  args: [appDir, ...switches],
-  env: { ...process.env, BUTTER_E2E: '1', BUTTER_STORE: storePath },
-  timeout: 60000,
-});
-const page = await app.firstWindow();
-const errors = [];
-page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-page.on('pageerror', (e) => errors.push(String(e)));
+let { app, page, errors } = await launch(arg('video'), arg('audio'), { BUTTER_CAL_SPEED: '0.12' });
 const shot = (n) => page.screenshot({ path: path.join(SHOTS, n + '.png') });
 const inject = (type, extra = {}) => page.evaluate(([t, x]) => window.__butter.inject(t, x), [type, extra]);
 const screen = () => page.evaluate(() => window.__butter.S.screenName);
-const S = (expr) => page.evaluate(`(() => { const S = window.__butter.S; return ${expr}; })()`);
+const S = (expr) => page.evaluate(`(() => { const S = window.__butter.S; const screens = window.__butter.screens; return ${expr}; })()`);
 
 try {
-  await check('app boots, home screen, services wired', async () => {
+  await check('app boots on home with a v3 calibration, services wired, no keys in renderer', async () => {
     await until(() => page.evaluate(() => window.__butter?.ready), 30000, 'ready');
     assert(await screen() === 'home', 'not on home');
+    assert(await S('!!S.engine'), 'gesture engine not started');
     const keys = await S('S.store.keys');
-    assert(keys.deepseek && keys.elevenlabs, 'API keys not loaded in main: ' + JSON.stringify(keys));
+    assert(keys.deepseek && keys.elevenlabs, 'API keys not loaded in main');
     const html = await page.content();
-    assert(!html.includes('sk-') && !html.includes('sk_'), 'API key leaked into renderer');
+    assert(!/sk-[a-f0-9]{20}|sk_[a-f0-9]{20}/.test(html), 'API key leaked into renderer');
   });
 
-  await check('real MediaPipe tracking on Anh\'s webcam frame (glasses on)', async () => {
+  await check('real MediaPipe on Anh\'s webcam frame (glasses): face locked, eyes open, lid ratio + blink score sane', async () => {
     await until(() => S('S.faceFrames > 20'), 30000, 'face frames');
-    const f = await S('({ fps: S.tracker.fps, delegate: S.tracker.delegate, face: S.lastFrame.face, bl: S.lastFrame.blinkL, br: S.lastFrame.blinkR, feat: S.lastFrame.feat, rate: S.faceFrames / S.frames })');
-    assert(f.face && f.rate > 0.9, 'face detection rate ' + f.rate);
-    assert(f.feat.length === 4 && f.feat.every(Number.isFinite), 'bad features');
-    assert(f.bl < 0.5 && f.br < 0.5, 'eyes read as closed');
-    return `fps=${f.fps.toFixed(1)} delegate=${f.delegate} detect=${(f.rate * 100).toFixed(0)}% blink=${f.bl.toFixed(2)}/${f.br.toFixed(2)} feat=[${f.feat.map((x) => x.toFixed(3))}]`;
+    const f = await S('({ fps: S.tracker.fps, delegate: S.tracker.delegate, lock: S.lastFrame.lock, multiple: S.lastFrame.multiple, raw: S.lastFrame.raw, eyePx: S.lastFrame.eyePx, glare: S.lastFrame.glare, rate: S.faceFrames / S.frames })');
+    assert(f.lock === 'locked' && !f.multiple, 'lock ' + f.lock);
+    assert(f.rate > 0.9, 'detection rate ' + f.rate);
+    for (const e of ['L', 'R']) {
+      assert(f.raw.b[e] < 0.5, 'blink score says closed: ' + f.raw.b[e]);
+      assert(f.raw.r[e] > 0.12 && f.raw.r[e] < 0.5, 'lid ratio out of range: ' + f.raw.r[e]);
+    }
+    assert(f.eyePx > 22, 'eye too small: ' + f.eyePx);
+    return `fps=${f.fps.toFixed(1)} ${f.delegate} detect=${(f.rate * 100).toFixed(0)}% blink=${f.raw.b.L.toFixed(2)}/${f.raw.b.R.toFixed(2)} lid=${f.raw.r.L.toFixed(3)}/${f.raw.r.R.toFixed(3)} eye=${f.eyePx.toFixed(0)}px glare=${(f.glare * 100).toFixed(1)}%`;
   });
-  // From here on gestures are injected; detach the engine so the synthetic calibration can't
-  // turn the (still) photo into stray events.
+  // From here on gestures are injected; detach the engine so a synthetic calibration can't misread the photo.
   await page.evaluate(() => { window.__butter.S.engine = null; });
   await shot('01-home');
 
-  await check('robot link: connects to butter-drive (mock)', async () => {
-    await until(() => S('S.butter.connected && S.butter.mock'), 8000, 'butter connected');
-  });
+  await check('robot link: connects to butter-drive (mock)', async () => { await until(() => S('S.butter.connected && S.butter.mock'), 8000, 'butter connected'); });
 
-  await check('home: look up highlights Drive, blink opens it', async () => {
-    await inject('LOOK_UP', { dir: 'up' }); await inject('LOOK_END');
-    assert(await page.locator('.choice.t-up.focus').count() === 1, 'drive tile not focused');
-    await inject('BLINK');
+  await check('home: winks move the highlight around, double blink opens', async () => {
+    await inject('WINK_RIGHT');
+    assert(await page.locator('.choice.t-right.focus').count() === 1, 'wink right did not move to Play');
+    await inject('WINK_LEFT');
+    assert(await page.locator('.choice.t-up.focus').count() === 1, 'wink left did not move back to Drive');
+    await inject('DOUBLE_BLINK');
     assert(await screen() === 'drive', 'did not open drive');
   });
 
-  await check('drive (eyes profile): parked looks do nothing; blink arms; held look drives with heartbeat; center stops', async () => {
+  await check('drive: 1st double blink only asks to confirm; 2nd drives (heartbeat holds it); 3rd stops', async () => {
     motorLog = [];
-    await inject('LOOK_UP', { dir: 'up' }); await sleep(400); await inject('LOOK_END');
-    assert(motors().length === 0, 'moved while parked: ' + motors());
-    await inject('BLINK');
-    await inject('LOOK_UP', { dir: 'up' });
-    await sleep(1600); // 3.5x the 450 ms TTL: only the heartbeat keeps it going
-    await shot('02-drive-forward');
-    assert(motors().join() === 'forward', 'expected sustained forward, got ' + motors());
-    await inject('LOOK_END'); await sleep(250);
-    await inject('LOOK_LEFT', { dir: 'left' }); await sleep(500); await inject('LOOK_END'); await sleep(250);
-    await inject('LOOK_DOWN', { dir: 'down' }); await sleep(400);
-    await inject('FACE_LOST'); await sleep(250);
-    assert(motors().join() === 'forward,stop,left,stop,backward,stop', 'sequence ' + motors());
+    await inject('DOUBLE_BLINK'); await sleep(300);
+    assert(motors().length === 0, 'moved without confirmation');
+    assert((await page.locator('#badge').textContent()).includes('again'), 'no confirm prompt');
+    await shot('02-drive-confirm');
+    await inject('DOUBLE_BLINK'); await sleep(1600);
+    await shot('03-drive-forward');
+    await inject('DOUBLE_BLINK'); await sleep(250);
+    assert(motors().join() === 'forward,stop', 'sequence ' + motors());
   });
 
-  await check('drive: robot dies mid-drive -> UI shows offline; restarts -> reconnects parked, no resume', async () => {
+  await check('drive: confirmation expires after 3 s (a stray double blink never starts it later)', async () => {
     motorLog = [];
-    await inject('BLINK'); // engaged was cleared by FACE_LOST, re-arm
-    await inject('LOOK_UP', { dir: 'up' }); await sleep(300);
+    await inject('DOUBLE_BLINK'); await sleep(3300);
+    await inject('DOUBLE_BLINK'); await sleep(300);
+    assert(motors().length === 0, 'started from an expired confirmation: ' + motors());
+    await inject('BOTH_CLOSED'); // clear the fresh prompt
+  });
+
+  await check('drive: wink = short timed turn, hold = turn while held, face lost = stop', async () => {
+    motorLog = [];
+    await inject('WINK_LEFT'); await sleep(900);
+    await inject('HOLD_RIGHT', { side: 'right' }); await sleep(800); await inject('HOLD_END', { side: 'right' }); await sleep(200);
+    await inject('DOUBLE_BLINK'); await inject('DOUBLE_BLINK'); await sleep(400);
+    await inject('FACE_LOST'); await sleep(250);
+    const turn = motorLog.filter((x) => x.dir);
+    assert(motors().join() === 'left,stop,right,stop,forward,stop', 'sequence ' + motors());
+    const pulse = turn[1].t - turn[0].t, hold = turn[3].t - turn[2].t;
+    assert(pulse > 400 && pulse < 800, 'wink turn ' + pulse);
+    assert(hold > 650 && hold < 1100, 'hold turn ' + hold);
+    return `wink turn ${pulse} ms, hold turn ${hold} ms`;
+  });
+
+  await check('drive: robot dies mid-drive -> offline badge; restarts -> reconnects stopped, no resume', async () => {
+    motorLog = [];
+    await inject('DOUBLE_BLINK'); await inject('DOUBLE_BLINK'); await sleep(300);
     robot.kill('SIGKILL');
     await until(async () => (await page.locator('#badge').textContent()).includes('offline'), 4000, 'offline badge');
-    await inject('LOOK_END');
     startRobot();
     await until(() => S('S.butter.connected'), 8000, 'reconnect');
     await sleep(800);
     assert(!motors().slice(1).includes('forward'), 'motion resumed after reconnect: ' + motors());
+    await inject('DOUBLE_BLINK'); // stop the cruise state in the UI
   });
 
-  await check('drive: 2 s eye close stops, second one goes home', async () => {
-    await inject('LONG_CLOSE');
-    await inject('LONG_CLOSE');
+  await check('drive: eyes closed 2 s stops; again goes home', async () => {
+    await inject('BOTH_CLOSED'); await inject('BOTH_CLOSED');
     assert(await screen() === 'home', 'not home');
   });
 
-  await check('settings: eye navigation switches profile to winks and persists to disk', async () => {
-    await inject('LOOK_DOWN', { dir: 'down' }); await inject('LOOK_END'); await inject('BLINK');
+  await check('settings: winks pick a row, double blink changes it, saved to disk; gestures card shown', async () => {
+    await page.evaluate(() => { window.__butter.screens.home.i = 2; window.__butter.screens.home.render(); });
+    await inject('DOUBLE_BLINK');
     assert(await screen() === 'settings', 'settings not open');
-    await inject('LOOK_RIGHT', { dir: 'right' });
-    await until(() => S("S.settings.profile === 'winks'"), 3000, 'profile change');
-    await shot('05-settings');
-    const disk = JSON.parse(fs.readFileSync(storePath, 'utf8'));
-    assert(disk.settings.profile === 'winks', 'not persisted');
-    await inject('LONG_CLOSE');
-  });
-
-  await check('drive (winks profile): wink = timed turn, double blink = cruise, blink = stop', async () => {
-    await inject('LOOK_UP', { dir: 'up' }); await inject('LOOK_END'); await inject('BLINK');
-    motorLog = [];
-    await inject('WINK_LEFT'); await sleep(900);
-    await inject('DOUBLE_BLINK'); await sleep(1200);
-    await inject('BLINK'); await sleep(200);
-    assert(motors().join() === 'left,stop,forward,stop', 'sequence ' + motors());
-    const turn = motorLog.filter((x) => x.dir);
-    const turnMs = turn[1].t - turn[0].t;
-    assert(turnMs > 400 && turnMs < 800, 'turn pulse ' + turnMs);
-    await inject('LONG_CLOSE');
-    return `turn pulse ${turnMs} ms`;
-  });
-
-  await check('drive (clutch profile): only moves while one eye is held shut', async () => {
-    await page.evaluate(() => window.butterApi.saveSettings({ profile: 'clutch' }).then((s) => { window.__butter.S.settings = s; }));
-    await inject('LOOK_UP', { dir: 'up' }); await inject('LOOK_END'); await inject('BLINK');
-    motorLog = [];
-    await inject('LOOK_UP', { dir: 'up' }); await sleep(300); await inject('LOOK_END');
-    await inject('WINK_HOLD_START', { side: 'left' });
-    await inject('LOOK_UP', { dir: 'up' }); await sleep(600);
-    await inject('WINK_HOLD_END', { side: 'left' }); await sleep(200);
-    assert(motors().join() === 'forward,stop', 'sequence ' + motors());
-    await inject('LOOK_END'); await inject('LONG_CLOSE');
-    await page.evaluate(() => window.butterApi.saveSettings({ profile: 'eyes' }).then((s) => { window.__butter.S.settings = s; }));
+    await inject('DOUBLE_BLINK'); // row 0: voice output laptop -> butter
+    await until(() => S("S.settings.voiceOut === 'butter'"), 3000, 'setting change');
+    assert(JSON.parse(fs.readFileSync(storePath, 'utf8')).settings.voiceOut === 'butter', 'not persisted');
+    assert((await page.content()).includes('Gestures you can use'), 'no gestures card');
+    await shot('07-settings');
+    await page.evaluate(() => window.butterApi.saveSettings({ voiceOut: 'laptop' }).then((s) => { window.__butter.S.settings = s; }));
+    await inject('BOTH_CLOSED');
   });
 
   let heardAt;
-  await check('talk: fake mic voice -> VAD -> ElevenLabs Scribe -> transcript', async () => {
-    await inject('LOOK_LEFT', { dir: 'left' }); await inject('LOOK_END'); await inject('BLINK');
+  await check('talk: fake mic voice -> VAD (audio thread) -> ElevenLabs Scribe -> transcript', async () => {
+    await page.evaluate(() => { window.__butter.screens.home.i = 3; window.__butter.screens.home.render(); });
+    await inject('DOUBLE_BLINK');
     assert(await screen() === 'talk', 'talk not open');
-    const text = await until(() => S("(S.screen.convo.find(m => m.who === 'them') || {}).text"), 25000, 'heard speech');
+    const text = await until(() => S("(screens.talk.convo.find(m => m.who === 'them') || {}).text"), 25000, 'heard speech');
     heardAt = Date.now();
-    const mode = await page.evaluate(() => window.__butter.mic()?.mode);
-    assert(mode === 'worklet', 'mic not on the audio thread: ' + mode);
+    assert(await page.evaluate(() => window.__butter.mic()?.mode) === 'worklet', 'mic not on the audio thread');
     assert(/movie/i.test(text) && /tonight/i.test(text), 'bad transcript: ' + text);
     return `"${text}"`;
   });
 
-  await check('talk: DeepSeek replies arrive, 5 options, most likely in the middle and focused', async () => {
-    await until(() => S("!S.screen.loading && S.screen.options.length === 5 && S.screen.convo.some(m => m.who === 'them')"), 15000, 'options');
-    const o = await S('({ opts: S.screen.options, focus: S.screen.focus, info: S.screen.info })');
-    assert(o.focus === 2, 'focus not centered');
+  await check('talk: 3 DeepSeek replies, most likely in the middle and selected', async () => {
+    await until(() => S("!screens.talk.loading && screens.talk.options.length === 3 && screens.talk.convo.some(m => m.who === 'them')"), 15000, 'options');
+    const o = await S('({ opts: screens.talk.options, focus: screens.talk.focus, info: screens.talk.info })');
+    assert(o.focus === 1, 'focus not on the middle');
     assert(!o.info.includes('fallback'), o.info);
-    await shot('03-talk-options');
-    return `${o.info} | ${JSON.stringify(o.opts)} | speech->options ${Date.now() - heardAt} ms after transcript`;
+    await shot('04-talk-options');
+    return `${o.info} | ${JSON.stringify(o.opts)} | ${Date.now() - heardAt} ms after transcript`;
   });
 
-  await check('talk: look right + blink speaks the option (ElevenLabs), logs it, mutes mic while speaking', async () => {
-    await page.evaluate(() => { const m = window.__butter.S; m._muted = []; const iv = setInterval(() => m._muted.push(m.screen?.convo && document.querySelector('#meter div')?.style.width), 50); setTimeout(() => clearInterval(iv), 4000); });
-    await inject('LOOK_RIGHT', { dir: 'right' }); await inject('LOOK_END');
-    const picked = await S('S.screen.options[S.screen.focus]');
-    assert((await S('S.screen.focus')) === 3, 'focus did not move right');
-    const t0 = Date.now();
+  await check('talk: wink right + double blink says it (ElevenLabs), remembered as the user\'s style', async () => {
+    await inject('WINK_RIGHT');
+    assert(await S('screens.talk.focus') === 2, 'focus did not move right');
+    const picked = await S('screens.talk.options[2]');
+    await inject('DOUBLE_BLINK');
+    await until(() => S("screens.talk.convo.some(m => m.who === 'me')"), 5000, 'me message');
+    await until(() => JSON.parse(fs.readFileSync(storePath, 'utf8')).voiceExamples.includes(picked), 3000, 'voice example saved');
     const r = await page.evaluate((txt) => window.butterApi.speak(txt), picked);
     assert(r.audio && r.audio.length > 3000, 'no TTS audio: ' + (r.error || ''));
-    await inject('BLINK');
-    await until(() => S("S.screen.convo.at(-1)?.who === 'me' || S.screen.convo.at(-2)?.who === 'me'"), 5000, 'me message');
-    await until(() => JSON.parse(fs.readFileSync(storePath, 'utf8')).voiceExamples.includes(picked), 3000, 'voice example saved');
-    await sleep(500);
-    await shot('04-talk-said');
-    return `said "${picked}" (TTS ${r.ms} ms, ${Date.now() - t0} ms incl. playback)`;
+    await sleep(400); await shot('05-talk-said');
+    return `said "${picked}" (TTS ${r.ms} ms)`;
   });
 
-  await check('talk: caregiver typing path + follow-up replies', async () => {
+  await check('talk: caregiver typing gets 3 fresh replies with a yes and a no', async () => {
     await page.fill('#typeIn', 'Are you hungry?');
     await page.press('#typeIn', 'Enter');
-    await until(() => S("!S.screen.loading && S.screen.convo.at(-1).text === 'Are you hungry?' && S.screen.options.length === 5"), 15000, 'options for typed');
-    const opts = await S('S.screen.options');
-    assert(opts.some((x) => /yes|yeah|sure|please|starving|bit/i.test(x)) && opts.some((x) => /\bno\b|not/i.test(x)), 'yes/no missing: ' + opts);
+    await until(() => S("!screens.talk.loading && screens.talk.convo.at(-1).text === 'Are you hungry?' && screens.talk.options.length === 3"), 15000, 'options for typed');
+    const opts = await S('screens.talk.options');
+    assert(opts.some((x) => /yes|yeah|sure|starving|bit|please/i.test(x)) && opts.some((x) => /\bno\b|not/i.test(x)), 'yes/no missing: ' + opts);
     return JSON.stringify(opts);
   });
 
-  await check('talk: look down = quick phrases, blink says "Yes" instantly', async () => {
-    await inject('LOOK_DOWN', { dir: 'down' }); await inject('LOOK_END');
+  await check('talk: hold left = quick phrases, double blink says "Yes"; hold right = new replies', async () => {
+    await inject('HOLD_LEFT', { side: 'left' }); await inject('HOLD_END', { side: 'left' });
     assert(await page.locator('.quick .choice').count() === 8, 'quick board missing');
     await shot('06-quick');
-    await inject('BLINK');
-    await until(() => S("S.screen.convo.some(m => m.who === 'me' && m.text === 'Yes')"), 5000, 'said yes');
+    await inject('DOUBLE_BLINK');
+    await until(() => S("screens.talk.convo.some(m => m.who === 'me' && m.text === 'Yes')"), 5000, 'said yes');
+    const before = await S('screens.talk.reqId');
+    await inject('HOLD_RIGHT', { side: 'right' }); await inject('HOLD_END', { side: 'right' });
+    assert(await S('screens.talk.reqId') > before, 'no refresh');
   });
 
-  await check('talk -> home via 2 s close; snake steers by look', async () => {
-    await inject('LONG_CLOSE');
+  await check('talk -> home (eyes closed 2 s); snake turns relative to its heading on winks', async () => {
+    await inject('BOTH_CLOSED');
     assert(await screen() === 'home', 'not home');
-    await inject('LOOK_RIGHT', { dir: 'right' }); await inject('LOOK_END'); await inject('BLINK');
+    await page.evaluate(() => { window.__butter.screens.home.i = 1; window.__butter.screens.home.render(); });
+    await inject('DOUBLE_BLINK');
     assert(await screen() === 'snake', 'snake not open');
-    await inject('LOOK_DOWN', { dir: 'down' }); await inject('LOOK_END');
-    await sleep(700);
-    assert(await S('S.screen.game.dir') === 'down', 'snake did not turn');
-    await shot('07-snake');
-    await inject('LONG_CLOSE');
+    await inject('WINK_RIGHT'); await sleep(700);
+    assert(await S('screens.snake.game.dir') === 'down', 'snake did not turn right from heading right');
+    await shot('08-snake');
+    await inject('BOTH_CLOSED');
   });
 
-  await check('calibration on a still photo fails safely with a clear report (no bogus model saved)', async () => {
+  await check('HUD: both eyes shown, no multiple-faces badge for one face', async () => {
+    assert(await page.locator('#eyeL').count() === 1 && await page.locator('#eyeR').count() === 1, 'eye display missing');
+    assert(await page.locator('#pillMulti').isHidden(), 'multiple-faces badge shown for one face');
+  });
+
+  await check('calibration on a still photo (fast mode): skips gestures it can\'t see, fails safely, keeps old calibration', async () => {
     const before = await S('S.store.calibration.createdAt');
-    await page.evaluate(() => window.__butter.S.screenName); // keep
     await page.keyboard.press('c');
-    await until(() => page.locator('.report').count(), 40000, 'calibration report');
-    await shot('08-calibration-report');
+    await until(() => page.locator('#reading').isVisible(), 20000, 'relaxed reading step');
+    await shot('09-cal-reading');
+    await until(() => page.locator('.report').count(), 90000, 'report card');
+    await shot('10-cal-report');
     const txt = await page.locator('.report').innerText();
-    assert(/failed/i.test(txt), 'a photo that never looks around must not calibrate: ' + txt.slice(0, 200));
+    assert(/didn.t work/i.test(txt), 'a photo must not calibrate: ' + txt.slice(0, 200));
     assert((await S('S.store.calibration.createdAt')) === before, 'bad calibration was saved');
-    return txt.replace(/\s+/g, ' ').slice(0, 160);
+    return txt.replace(/\s+/g, ' ').slice(0, 170);
   });
 
   await check('no renderer errors', async () => {
     const bad = errors.filter((e) => !/^INFO:|^W0000|^I0000|favicon|ERR_CONNECTION_REFUSED|127\.0\.0\.1:1|net::ERR|Failed to load resource|WebGL|GPU|gl_|OpenGL/i.test(e));
     assert(bad.length === 0, bad.slice(0, 5).join(' | '));
-    return `${errors.length} ignored (network/GPU)`;
   });
+  await close(app);
+
+  if (arg('video2')) {
+    seed();
+    ({ app, page, errors } = await launch(arg('video2'), null));
+    await check('two real faces in view: locks the closer one, small "Multiple faces detected" badge', async () => {
+      await until(() => page.evaluate(() => window.__butter?.ready), 30000, 'ready');
+      await until(() => page.evaluate(() => window.__butter.S.faceFrames > 15), 30000, 'face frames');
+      const f = await page.evaluate(() => ({ lock: window.__butter.S.lastFrame.lock, faces: window.__butter.S.lastFrame.faces, multiple: window.__butter.S.lastFrame.multiple, cx: window.__butter.S.lastFrame.landmarks?.[1]?.x }));
+      assert(f.faces === 2 && f.multiple, 'expected 2 faces, got ' + JSON.stringify(f));
+      assert(f.lock === 'locked' && f.cx < 0.5, 'did not lock the larger (left) face: ' + JSON.stringify(f));
+      await until(() => page.locator('#pillMulti').isVisible(), 3000, 'badge');
+      assert((await page.locator('#pillMulti').innerText()).includes('Multiple faces detected'));
+      await page.screenshot({ path: path.join(SHOTS, '11-two-faces.png') });
+      return JSON.stringify(f);
+    });
+  }
 } finally {
-  await Promise.race([app.close().catch(() => {}), sleep(4000)]);
-  try { app.process().kill('SIGKILL'); } catch {}
+  await close(app);
   robot.kill('SIGKILL');
   fs.rmSync(storePath, { force: true });
 }

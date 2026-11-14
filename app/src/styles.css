@@ -45,6 +45,7 @@
   font-variant-numeric: tabular-nums;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; overflow: hidden; user-select: none; }
 body {
   display: flex; flex-direction: column;
@@ -74,12 +75,18 @@ svg { display: block; }
 .pill b { font-weight: 500; }
 .pill.dim { color: var(--ink); background: var(--wall-2); }
 .hud { display: flex; gap: 12px; align-items: center; }
-.radar { width: 60px; height: 60px; border-radius: 50%; background: var(--linen); border: 1px solid var(--line); position: relative; box-shadow: var(--shadow); }
-.radar .ring { position: absolute; inset: 15px; border-radius: 50%; border: 1.5px dashed var(--oak-line); }
-.puck { position: absolute; width: 14px; height: 14px; margin: -7px; left: 50%; top: 50%; border-radius: 50%; background: var(--ink-3); transition: left .12s linear, top .12s linear, background .2s; }
-.puck.cand { background: var(--lamp-deep); }
-.puck.held { background: var(--lamp); border: 3px solid var(--lamp-deep); }
-.puck.closed { background: transparent; border: 2px solid var(--ink-3); }
+/* eye-state display: each eye's lid closes as Butter sees it; a ring fills while holding */
+.eyes { display: flex; gap: 8px; padding: 8px 10px; border-radius: 999px; background: var(--linen); border: 1px solid var(--line); box-shadow: var(--shadow);
+  background-image: conic-gradient(var(--lamp-deep) var(--both, 0deg), transparent 0); background-origin: border-box; }
+.eyeball { --lid: 0%; --hold: 0deg; position: relative; width: 40px; height: 40px; border-radius: 50%; background: conic-gradient(var(--lamp-deep) var(--hold), var(--wall-2) 0); display: grid; place-items: center; }
+.eyeball span { width: 30px; height: 30px; border-radius: 50%; background: radial-gradient(circle at 50% 50%, var(--ink) 0 6px, var(--linen) 7px); position: relative; overflow: hidden; border: 2px solid var(--ink-2); }
+.eyeball span::after { content: ''; position: absolute; left: 0; right: 0; top: 0; height: var(--lid); background: var(--oak); border-bottom: 2px solid var(--ink-2); transition: height .06s linear; }
+.eyeball.lost span { opacity: .3; }
+.last { font-size: 14px; font-weight: 700; color: var(--lamp-ink); background: var(--lamp); padding: 6px 12px; border-radius: 999px; opacity: 0; }
+.last.show { animation: lastg 1.6s var(--ease); }
+@keyframes lastg { 10%, 70% { opacity: 1; } }
+.pill.note { background: oklch(97% 0.04 92); border-color: var(--lamp-deep); color: var(--lamp-ink); }
+.pill.note i { background: var(--lamp-deep); }
 .cam { position: relative; width: 108px; height: 60px; border-radius: 14px; overflow: hidden; background: var(--night); box-shadow: var(--shadow); }
 .cam video, .cam canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
 
@@ -146,8 +153,9 @@ h2 { font-size: 20px; margin: 4px 0 0; color: var(--ink-2); font-weight: 500; }
 .msg.them { background: var(--linen); border: 1px solid var(--line); align-self: flex-start; border-bottom-left-radius: 8px; box-shadow: var(--shadow); }
 .msg.me { background: var(--ink); color: var(--linen); align-self: flex-end; border-bottom-right-radius: 8px; font-weight: 500; }
 .msg.sys { align-self: center; color: var(--ink-2); font-size: 18px; background: none; margin-top: auto; text-align: center; }
-.options { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; }
-.options .choice { font-size: 22px; font-weight: 500; line-height: 1.28; padding: 22px 18px; }
+.options { display: grid; grid-template-columns: 1fr 1.25fr 1fr; gap: 18px; }
+.options .choice { font-size: 26px; font-weight: 500; line-height: 1.28; padding: 26px 22px; }
+.options .choice.best { font-size: 29px; }
 .options .choice.best::before { content: 'Most likely'; position: absolute; top: 12px; font-size: 13px; font-weight: 700; color: var(--ink-3); }
 .options .choice.best.focus::before { color: var(--lamp-ink); opacity: .75; }
 .options .choice.loading { color: var(--ink-3); animation: breathe 1.6s var(--ease) infinite; }
@@ -167,14 +175,22 @@ h2 { font-size: 20px; margin: 4px 0 0; color: var(--ink-2); font-weight: 500; }
 .calib { position: absolute; inset: 0; background: var(--wall); z-index: 5; }
 .calib .target { position: absolute; width: 76px; height: 76px; margin: -38px; border-radius: 50%; background: var(--ink); border: 14px solid var(--lamp); box-shadow: 0 10px 24px -6px oklch(55% 0.12 80 / .5); transition: left .6s var(--ease), top .6s var(--ease), transform .4s var(--ease), opacity .3s; }
 .calib .target.collect { transform: scale(.5); }
-.calib .label { position: absolute; left: 0; right: 0; top: 42%; text-align: center; font-size: 40px; font-weight: 800; letter-spacing: -0.02em; }
-.calib .sub { position: absolute; left: 0; right: 0; top: calc(42% + 62px); text-align: center; color: var(--ink-2); font-size: 19px; }
+.calib .label { position: absolute; left: 0; right: 0; top: 30%; text-align: center; font-size: 40px; font-weight: 800; letter-spacing: -0.02em; }
+.calib .sub { position: absolute; left: 0; right: 0; top: calc(30% + 62px); text-align: center; color: var(--ink-2); font-size: 19px; }
 .calib .bar { position: absolute; left: 30%; right: 30%; bottom: 64px; height: 8px; background: var(--wall-2); border-radius: 4px; overflow: hidden; }
 .calib .bar div { height: 100%; background: var(--lamp-deep); width: 0; transition: width .3s var(--ease); }
 .report { max-width: 720px; margin: 50px auto; background: var(--linen); border-radius: var(--r); padding: 34px 40px; border: 1px solid var(--line); font-size: 18px; line-height: 1.6; box-shadow: var(--shadow); }
 .report h1 { margin-bottom: 8px; }
 .report .row { display: flex; justify-content: space-between; border-bottom: 1px solid var(--line); padding: 8px 0; }
 .report .warn { color: oklch(45% 0.1 60); font-size: 16px; }
+.report .note { color: var(--ink-2); font-size: 16px; }
+.report b.ok { color: var(--go); } .report b.off { color: var(--ink-3); font-weight: 500; }
+.calib .calstep { position: absolute; top: 34px; left: 0; right: 0; text-align: center; font-size: 15px; font-weight: 700; color: var(--ink-2); }
+.calib .reading { position: absolute; left: 50%; top: 58%; transform: translateX(-50%); width: min(820px, 80%); font-size: 26px; line-height: 1.6; color: var(--ink); text-wrap: pretty; }
+.calib .reps { position: absolute; left: 0; right: 0; top: calc(30% + 120px); display: flex; justify-content: center; gap: 14px; }
+.calib .reps i { width: 18px; height: 18px; border-radius: 50%; background: var(--wall-2); border: 2px solid var(--oak-line); }
+.calib .reps i.now { background: var(--lamp); border-color: var(--lamp-deep); transform: scale(1.3); }
+.calib .reps i.done { background: var(--ink-2); border-color: var(--ink-2); }
 
 /* ---------------------------------------------------------------- settings */
 .settings { display: flex; flex-direction: column; gap: 10px; max-width: 980px; overflow-y: auto; padding: 4px 6px 12px; }

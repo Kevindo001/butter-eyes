@@ -1,129 +1,203 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { GestureEngine } from '../src/gesture-engine.js';
-import { computeCalibration } from '../src/calibration.js';
-import { makeSim, simCalibrationSamples } from './sim.js';
+import { fitCalibration } from '../src/calibration.js';
+import { FaceLock } from '../src/face-lock.js';
+import { makeSim, simCalibrationSamples, PERSONAS, G } from './sim.js';
 
-function setup(opts = {}) {
-  const sim = makeSim(opts);
-  const { cal, report } = computeCalibration(simCalibrationSamples(sim, opts));
-  assert.ok(cal, 'calibration failed: ' + report.warnings.join('; '));
+const IGNORE = new Set(['FACE_FOUND', 'FACE_LOST', 'HOLD_END', 'CALIBRATION_DRIFT']);
+const types = (ev) => ev.map((e) => e.type).filter((x) => !IGNORE.has(x));
+
+function setup(persona, seed = 3) {
+  const sim = makeSim({ seed, persona });
+  const { cal, report } = fitCalibration(simCalibrationSamples(sim));
+  assert.ok(cal, `${persona}: calibration failed: ${report.warnings.join('; ')}`);
   const eng = new GestureEngine(cal);
   const feed = (frames) => frames.flatMap(({ t, f }) => eng.update(f, t));
-  sim.run([[1500, {}]]).forEach(({ t, f }) => eng.update(f, t)); // warm up
+  feed(sim.run([[1500, {}]]));
   return { sim, eng, feed, cal, report };
 }
-const types = (ev) => ev.map((e) => e.type).filter((x) => x !== 'FACE_FOUND' && x !== 'FACE_LOST');
 
-test('calibration finds all 4 directions and winks', () => {
-  const { report } = setup();
-  assert.equal(report.ok, true);
-  assert.deepEqual(Object.keys(report.dirs).sort(), ['down', 'left', 'right', 'up']);
-  assert.equal(report.winks, true);
+const EXPECT_RELIABLE = {
+  typical: ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT'],
+  glasses: ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT'],
+  smallEyes: ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT'],
+  glassesSmall: ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT'],
+  weak: ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT'],
+  partialWink: ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT'],
+  asymmetric: ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT'],
+  noWink: ['DOUBLE_BLINK'],
+};
+
+for (const persona of Object.keys(PERSONAS)) {
+  test(`[${persona}] calibration report card enables exactly the gestures this person can do`, () => {
+    const { cal, report } = setup(persona);
+    const on = Object.entries(cal.params.enabled).filter(([g, v]) => v && g !== 'BOTH_CLOSED').map(([g]) => g).sort();
+    assert.deepEqual(on, [...EXPECT_RELIABLE[persona]].sort(), JSON.stringify(report.gestures));
+    assert.equal(report.gestures.BOTH_CLOSED.reliable, true);
+  });
+
+  test(`[${persona}] 10 minutes relaxed (natural blinks incl. quick pairs, drops, noise): zero commands`, () => {
+    for (const seed of [3, 4]) {
+      const { sim, feed } = setup(persona, seed);
+      const ev = types(feed(sim.run([[600_000, {}]])));
+      assert.deepEqual(ev, [], `seed ${seed}: ${ev.join(',')}`);
+    }
+  });
+
+  test(`[${persona}] each enabled gesture caught (holds/stop 20/20, winks/double >=18/20), never mistaken for another`, () => {
+    const { sim, feed, cal } = setup(persona, 5);
+    for (const g of [...EXPECT_RELIABLE[persona], 'BOTH_CLOSED']) {
+      let hit = 0; const wrong = [];
+      for (let i = 0; i < 20; i++) {
+        const ev = types(feed([...sim.run([[700, {}]]), ...sim.run(G[g]), ...sim.run([[900, {}]])]));
+        if (ev.includes(g)) hit++;
+        for (const x of ev) if (x !== g) wrong.push(x);
+      }
+      // winks / double blink: a natural blink sometimes lands inside the gesture (measured ~97-99%, see below)
+      assert.ok(hit >= (g.startsWith('HOLD') || g === 'BOTH_CLOSED' ? 20 : 18), `${g}: caught ${hit}/20`);
+      assert.deepEqual(wrong, [], `${g} produced ${wrong.join(',')}`);
+    }
+  });
+}
+
+test('holds fire while still held (not on release) and HOLD_END follows on release', () => {
+  const { sim, feed } = setup('typical', 6);
+  sim.setNatural(false);
+  const ev = feed([...sim.run([[1500, { lidR: 1 }]]), ...sim.run([[600, {}]])]);
+  const hold = ev.find((e) => e.type === 'HOLD_RIGHT'), end = ev.find((e) => e.type === 'HOLD_END');
+  assert.ok(hold && end && hold.t < end.t);
+  assert.ok(end.t - hold.t > 500, 'hold fired well before the eye opened');
 });
 
-test('JITTER: 10 minutes of relaxed staring with natural blinks, drift, spikes, dropped frames -> zero commands', () => {
-  for (const seed of [1, 2, 3]) {
-    const { sim, feed } = setup({ seed });
-    const ev = types(feed(sim.run([[600_000, {}]])));
-    assert.deepEqual(ev, [], `seed ${seed} false events: ${ev.join(',')}`);
+test('a normal single blink, even a slow one, is never an input', () => {
+  const { sim, feed } = setup('typical', 7);
+  sim.setNatural(false);
+  for (const ms of [120, 200, 350, 600, 1200]) {
+    assert.deepEqual(types(feed([...sim.run([[ms, { lidL: 1, lidR: 1 }]]), ...sim.run([[1200, {}]])])), [], `${ms} ms blink`);
   }
 });
 
-test('JITTER at 1.5x noise: still no false commands over 5 minutes', () => {
-  const { sim, feed } = setup({ seed: 11, noise: 1.5 });
-  const ev = types(feed(sim.run([[300_000, {}]])));
-  assert.deepEqual(ev, []);
+test('refractory: a bouncy wink (eye flickers open 40 ms mid-wink) counts once', () => {
+  const { sim, feed } = setup('typical', 8);
+  sim.setNatural(false);
+  const ev = types(feed([...sim.run([[260, { lidL: 1 }]]), ...sim.run([[40, {}]]), ...sim.run([[260, { lidL: 1 }]]), ...sim.run([[900, {}]])]));
+  assert.deepEqual(ev, ['WINK_LEFT']);
 });
 
-test('each look direction fires exactly once, within 600 ms, and ends', () => {
-  const { sim, feed } = setup({ seed: 4 });
-  for (const d of ['left', 'right', 'up', 'down']) {
-    const start = sim.now();
-    const ev = feed(sim.run([[800, { gaze: d }]]));
-    const look = ev.find((e) => e.type === 'LOOK_' + d.toUpperCase());
-    assert.ok(look, `no LOOK_${d}`);
-    assert.ok(look.t - start < 600, `LOOK_${d} latency ${look.t - start}`);
-    assert.equal(ev.filter((e) => e.type.startsWith('LOOK_') && e.type !== 'LOOK_REPEAT').length, 1);
-    const end = feed(sim.run([[700, {}]]));
-    assert.ok(end.some((e) => e.type === 'LOOK_END'), `no LOOK_END after ${d}`);
-  }
+test('two deliberate winks a second apart count as two', () => {
+  const { sim, feed } = setup('typical', 8);
+  sim.setNatural(false);
+  const ev = types(feed([...sim.run(G.WINK_LEFT), ...sim.run([[700, {}]]), ...sim.run(G.WINK_LEFT), ...sim.run([[900, {}]])]));
+  assert.deepEqual(ev, ['WINK_LEFT', 'WINK_LEFT']);
 });
 
-test('a quick glance (150 ms) does not fire', () => {
-  const { sim, feed } = setup({ seed: 5 });
-  const ev = types(feed(sim.run([[150, { gaze: 'left' }], [800, {}]])));
-  assert.deepEqual(ev, []);
+test('closing both eyes 2 s fires even right after another gesture (safety stop)', () => {
+  const { sim, feed } = setup('typical', 9);
+  sim.setNatural(false);
+  const ev = types(feed([...sim.run(G.WINK_RIGHT), ...sim.run([[100, {}]]), ...sim.run(G.BOTH_CLOSED), ...sim.run([[500, {}]])]));
+  assert.ok(ev.includes('BOTH_CLOSED'), ev.join(','));
 });
 
-test('held look repeats for continuous drive, and stays held through a natural blink', () => {
-  const { sim, feed, eng } = setup({ seed: 6 });
-  const ev = feed(sim.run([[3000, { gaze: 'up' }]]));
-  assert.ok(ev.filter((e) => e.type === 'LOOK_REPEAT').length >= 2);
-  assert.equal(ev.filter((e) => e.type === 'LOOK_END').length, 0, 'gaze dropped while holding (natural blinks must not end it)');
-  assert.equal(eng.state.held, 'up');
+test('face lost mid-hold -> HOLD_END + FACE_LOST; a 1-frame dropout does nothing', () => {
+  const { sim, feed } = setup('typical', 10);
+  sim.setNatural(false);
+  const a = feed([...sim.run([[1200, { lidL: 1 }]])]).map((e) => e.type);
+  assert.ok(a.includes('HOLD_LEFT'));
+  const b = feed(sim.run([[800, { face: false }]])).map((e) => e.type);
+  assert.deepEqual(b, ['HOLD_END', 'FACE_LOST']);
+  const c = feed([...sim.run([[600, {}]]), ...sim.run([[30, { face: false }]]), ...sim.run([[600, {}]])]).map((e) => e.type);
+  assert.deepEqual(c, ['FACE_FOUND'], 'a 1-frame dropout must not reset anything');
 });
 
-test('deliberate blink (500 ms) -> BLINK; natural 150 ms blink -> nothing', () => {
-  const { sim, feed } = setup({ seed: 8, naturalBlinks: false });
-  assert.deepEqual(types(feed(sim.run([[500, { lidL: 1, lidR: 1 }], [500, {}]]))), ['BLINK']);
-  assert.deepEqual(types(feed(sim.run([[150, { lidL: 1, lidR: 1 }], [900, {}]]))), []);
-});
-
-test('double blink -> DOUBLE_BLINK (not BLINK)', () => {
-  const { sim, feed } = setup({ seed: 9, naturalBlinks: false });
-  const ev = types(feed(sim.run([[180, { lidL: 1, lidR: 1 }], [200, {}], [180, { lidL: 1, lidR: 1 }], [700, {}]])));
-  assert.deepEqual(ev, ['DOUBLE_BLINK']);
-});
-
-test('eyes closed 2 s -> LONG_CLOSE once', () => {
-  const { sim, feed } = setup({ seed: 10, naturalBlinks: false });
-  const ev = types(feed(sim.run([[2600, { lidL: 1, lidR: 1 }], [500, {}]])));
-  assert.deepEqual(ev, ['LONG_CLOSE']);
-});
-
-test('winks left/right, and a held wink acts as a clutch', () => {
-  const { sim, feed } = setup({ seed: 12, naturalBlinks: false });
-  assert.deepEqual(types(feed(sim.run([[400, { lidL: 1 }], [500, {}]]))), ['WINK_LEFT']);
-  assert.deepEqual(types(feed(sim.run([[400, { lidR: 1 }], [500, {}]]))), ['WINK_RIGHT']);
-  assert.deepEqual(types(feed(sim.run([[1500, { lidR: 1 }], [500, {}]]))), ['WINK_HOLD_START', 'WINK_HOLD_END']);
-});
-
-test('mirrored MediaPipe eye channels are auto-corrected by calibration', () => {
-  // simulate a camera where the "left" channel is really the right eye
-  const sim = makeSim({ seed: 13, naturalBlinks: false });
-  const swapF = (fr) => fr.map(({ t, f }) => ({ t, f: f.face ? { ...f, blinkL: f.blinkR, blinkR: f.blinkL } : f }));
-  const s = simCalibrationSamples(sim);
-  for (const k of Object.keys(s)) s[k] = swapF(s[k].map((f) => ({ t: 0, f }))).map((x) => x.f);
-  const { cal } = computeCalibration(s);
-  assert.equal(cal.swapEyes, true);
+test('glasses taken off after calibrating -> CALIBRATION_DRIFT suggestion, and no false commands', () => {
+  const sim = makeSim({ seed: 11, persona: 'glasses' });
+  const { cal } = fitCalibration(simCalibrationSamples(sim));
   const eng = new GestureEngine(cal);
-  const ev = swapF(sim.run([[1000, {}], [400, { lidL: 1 }], [500, {}]])).flatMap(({ t, f }) => eng.update(f, t));
+  const bare = makeSim({ seed: 12, persona: 'typical' }); // same person, glasses off: much lower blink baseline
+  const ev = bare.run([[60000, {}]]).flatMap(({ t, f }) => eng.update(f, t + 1e6));
+  assert.ok(ev.some((e) => e.type === 'CALIBRATION_DRIFT'), 'no drift warning');
+  assert.deepEqual(types(ev), []);
+});
+
+test('mirrored camera / swapped eye channels are corrected by calibration', () => {
+  const sim = makeSim({ seed: 13 });
+  const s = simCalibrationSamples(sim);
+  const mirror = (f) => (f.face ? { ...f, raw: { b: { L: f.raw.b.R, R: f.raw.b.L }, r: { L: f.raw.r.R, R: f.raw.r.L } } } : f);
+  for (const k of ['relaxed', 'closed']) s[k] = s[k].map(mirror);
+  for (const g in s.reps) s.reps[g] = s.reps[g].map((r) => r.map(mirror));
+  const { cal, report } = fitCalibration(s);
+  assert.ok(cal?.swapSides, JSON.stringify(report.notes));
+  const eng = new GestureEngine(cal);
+  sim.setNatural(false);
+  const ev = [...sim.run([[800, {}]]), ...sim.run(G.WINK_LEFT), ...sim.run([[800, {}]])].flatMap(({ t, f }) => eng.update(mirror(f), t));
   assert.deepEqual(types(ev), ['WINK_LEFT']);
 });
 
-test('face lost -> FACE_LOST and any held gaze ends (robot must stop)', () => {
-  const { sim, feed } = setup({ seed: 14 });
-  feed(sim.run([[800, { gaze: 'up' }]]));
-  const ev = feed(sim.run([[800, { face: false }]])).map((e) => e.type);
-  assert.ok(ev.includes('LOOK_END') && ev.includes('FACE_LOST'), ev.join(','));
-});
-
-test('weak vertical gaze gets disabled with a warning instead of misfiring', () => {
-  const sim = makeSim({ seed: 15 });
+test('calibration where the person never closes their eyes fails with a clear message', () => {
+  const sim = makeSim({ seed: 14 });
   const s = simCalibrationSamples(sim);
-  s.up = s.center.slice(0, 40); // user could not move eyes up
-  const { cal, report } = computeCalibration(s);
-  assert.ok(report.warnings.some((w) => w.includes('up')));
-  const eng = new GestureEngine(cal);
-  assert.equal(eng.dirVecs.up, undefined);
-});
-
-test('a face that never moves its eyes (photo / no effort) does NOT calibrate', () => {
-  const sim = makeSim({ seed: 16 });
-  const s = simCalibrationSamples(sim);
-  for (const d of ['left', 'right', 'up', 'down']) s[d] = s.center.slice(0, 48);
-  const { cal, report } = computeCalibration(s);
+  s.closed = s.relaxed.slice(0, 90);
+  for (const g in s.reps) s.reps[g] = s.reps[g].map((r) => r.map((f) => ({ ...f, raw: s.relaxed[50].raw })));
+  const { cal, report } = fitCalibration(s);
   assert.equal(cal, null);
-  assert.equal(report.ok, false);
+  assert.ok(report.warnings.length > 0);
+});
+
+// ------------------------------------------------------------------ face lock
+const face = (cx, cy, size, sig) => ({ cx, cy, size, sig });
+const SIG_USER = [0.24, 0.62, 0.38, 0.33, 0.42, 0.36, 0.84];
+const SIG_OTHER = [0.29, 0.7, 0.45, 0.28, 0.37, 0.41, 0.95];
+const jit = (s, k = 0.003) => s.map((v, i) => v + k * Math.sin(i * 7.3 + v * 100));
+
+test('face lock: caregiver leans in -> "multiple" flag, user keeps control', () => {
+  const L = new FaceLock(); L.setSignature({ mean: SIG_USER, sd: SIG_USER.map(() => 0.01) });
+  let r = L.update([face(0.5, 0.5, 0.3, jit(SIG_USER))], 0);
+  assert.equal(r.status, 'locked');
+  for (let t = 33; t < 2000; t += 33) {
+    r = L.update([face(0.82, 0.4, 0.22, jit(SIG_OTHER)), face(0.5 + 0.01 * Math.sin(t), 0.5, 0.3, jit(SIG_USER))], t);
+    assert.equal(r.index, 1); assert.equal(r.multiple, true); assert.equal(r.status, 'locked');
+  }
+});
+
+test('face lock: faces overlap and can\'t be told apart -> ambiguous (pause), no signature', () => {
+  const L = new FaceLock();
+  L.update([face(0.5, 0.5, 0.3)], 0);
+  const r = L.update([face(0.52, 0.5, 0.3), face(0.48, 0.5, 0.3)], 33);
+  assert.equal(r.status, 'ambiguous'); assert.equal(r.index, null);
+});
+
+test('face lock: user leaves, caregiver alone in frame is NOT adopted; user returns and is re-found', () => {
+  const L = new FaceLock(); L.setSignature({ mean: SIG_USER, sd: SIG_USER.map(() => 0.01) });
+  L.update([face(0.5, 0.5, 0.3, jit(SIG_USER))], 0);
+  L.update([], 33);
+  for (let t = 66; t < 3000; t += 33) assert.equal(L.update([face(0.45, 0.5, 0.3, jit(SIG_OTHER))], t).index, null);
+  const r = L.update([face(0.6, 0.55, 0.28, jit(SIG_USER)), face(0.45, 0.5, 0.3, jit(SIG_OTHER))], 3100);
+  assert.equal(r.index, 0); assert.equal(r.status, 'locked');
+});
+
+test('face lock: before calibration, two similar-size faces -> wait; clearly closest face -> lock it', () => {
+  assert.equal(new FaceLock().update([face(0.3, 0.5, 0.3), face(0.7, 0.5, 0.28)], 0).status, 'ambiguous');
+  assert.equal(new FaceLock().update([face(0.3, 0.5, 0.2), face(0.7, 0.5, 0.36)], 0).index, 1);
+});
+
+test('large sample: 8 people x 2 calibrations x 100 tries per gesture -> >=96% caught, zero confusions', { timeout: 300000 }, () => {
+  const tot = {};
+  for (const persona of Object.keys(PERSONAS)) for (const seed of [3, 4]) {
+    const sim = makeSim({ seed, persona });
+    const { cal } = fitCalibration(simCalibrationSamples(sim));
+    const eng = new GestureEngine(cal);
+    for (const g of Object.keys(G)) {
+      if (!cal.params.enabled[g]) continue;
+      tot[g] ??= { hit: 0, n: 0, wrong: 0 };
+      for (let i = 0; i < 100; i++) {
+        const ev = types([...sim.run([[700, {}]]), ...sim.run(G[g]), ...sim.run([[900, {}]])].flatMap(({ t, f }) => eng.update(f, t)));
+        tot[g].n++; if (ev.includes(g)) tot[g].hit++; if (ev.some((x) => x !== g)) tot[g].wrong++;
+      }
+    }
+  }
+  for (const [g, { hit, n, wrong }] of Object.entries(tot)) {
+    console.log(`  ${g}: ${(100 * hit / n).toFixed(1)}% caught, ${wrong} confused (n=${n})`);
+    assert.ok(hit / n >= 0.96, g); assert.equal(wrong, 0, g);
+  }
 });

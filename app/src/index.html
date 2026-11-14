@@ -13,10 +13,17 @@
       <span class="pill" id="pillFace"><i></i><b>Face</b></span>
       <span class="pill" id="pillButter"><i></i><b>Butter</b></span>
       <span class="pill" id="pillAi"><i></i><b>Voice + AI</b></span>
-      <span class="pill dim" id="pillProfile">Eyes only</span>
+      <span class="pill note" id="pillMulti" hidden><i></i><b>Multiple faces detected</b></span>
+      <span class="pill note" id="pillClose" hidden><i></i><b>Move closer</b></span>
+      <span class="pill note" id="pillGlare" hidden><i></i><b>Glare on glasses</b></span>
+      <span class="pill note" id="pillDrift" hidden><i></i><b>Recalibrate?</b></span>
     </div>
     <div class="hud">
-      <div class="radar" id="radar"><div class="ring"></div><div class="puck" id="puck"></div></div>
+      <span class="last" id="lastGesture"></span>
+      <div class="eyes" id="bothRing" title="Your eyes, as Butter sees them">
+        <div class="eyeball" id="eyeL" title="left eye"><span></span></div>
+        <div class="eyeball" id="eyeR" title="right eye"><span></span></div>
+      </div>
       <div class="cam"><video id="video" playsinline muted></video><canvas id="camOverlay"></canvas></div>
     </div>
   </header>

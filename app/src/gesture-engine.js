@@ -1,263 +1,223 @@
 // ============================================================================
-// Gesture engine: turns noisy per-frame face measurements into a few clean,
-// deliberate eye gestures. Pure logic, no DOM, so it is unit-testable in Node.
+// Gesture engine v3: eyelid gestures only. Pure logic (no DOM) so it runs in Node tests.
 //
-// Why this instead of a gaze cursor: a webcam cannot place a cursor on a
-// screen better than ~100+ px (the old eye_mouse.py measured 125 px), so the
-// cursor always shakes. Butter only needs ~6 commands, so we classify
-// DIRECTIONS and EYELID gestures with hysteresis + hold times. Noise inside
-// the dead band can never fire a command.
+// Inputs (everything else is ignored, including normal blinks and where the eyes look):
+//   DOUBLE_BLINK          two quick, deliberate blinks
+//   WINK_LEFT / RIGHT     one eye closed briefly while the other stays open
+//   HOLD_LEFT / RIGHT     one eye held closed past holdMs (fires while held); HOLD_END on release
+//   BOTH_CLOSED           both eyes closed >= bothMs (universal stop / back; always allowed)
+// Status events: FACE_LOST, FACE_FOUND, CALIBRATION_DRIFT
 //
-// Input per frame (from face-tracker.js):
-//   { face: bool, blinkL: 0..1, blinkR: 0..1, feat: number[], featEye?: {L,R} }   (feat = gaze features)
-// Output: array of events { type, t, ...} and a live `state` for the UI.
-//
-// Events:
-//   LOOK_LEFT / LOOK_RIGHT / LOOK_UP / LOOK_DOWN   gaze held past threshold for gazeHoldMs
-//   LOOK_REPEAT (dir)                              still holding, fires every repeatMs
-//   LOOK_END                                       gaze back to neutral
-//   BLINK                                          deliberate blink (both eyes, 350-1200 ms)
-//   DOUBLE_BLINK                                   two quick blinks within doubleBlinkGapMs
-//   LONG_CLOSE                                     both eyes closed >= longCloseMs (stop / back)
-//   WINK_LEFT / WINK_RIGHT                         one eye closed 250-1500 ms, other open
-//   WINK_HOLD_START / WINK_HOLD_END (side)         one eye held closed (clutch)
-//   FACE_LOST / FACE_FOUND
+// Frame: { face: bool, raw: { b:{L,R}, r:{L,R} } }   (raw readings, see closure.js)
+// Every threshold comes from this person's calibration (cal.params); nothing is learned at runtime.
 // ============================================================================
-import { OneEuroVec } from './one-euro.js';
+import { closure } from './closure.js';
 
-export const DIRS = ['left', 'right', 'up', 'down'];
+const OPEN_EYE_BLINK_MS = 350;
+const LEAD_MS = 70; // in an ordinary blink one eye can lead the other by a few tens of ms
 
-export const DEFAULTS = {
-  // gaze, in calibrated units (1.0 = how far you looked during calibration)
-  gazeEnter: 0.55,
-  gazeExit: 0.35,
-  gazeHoldMs: 280,
-  repeatMs: 900,
-  dominance: 0.2,          // best direction must beat 2nd best by this much
-  minCutoff: 1.0,          // One Euro on raw features
-  beta: 0.05,
-  driftRate: 0.0015,       // slow re-centering of "neutral" while relaxed
-  postBlinkMuteMs: 220,    // eyelids drag the gaze estimate during/after blinks
-  // eyelids, as fraction between open baseline (0) and closed baseline (1)
-  closeFrac: 0.55,
-  openFrac: 0.3,
-  deliberateBlinkMinMs: 350,
-  deliberateBlinkMaxMs: 1200,
-  longCloseMs: 2000,
-  doubleBlinkMinMs: 50,
-  doubleBlinkMaxMs: 330,
-  doubleBlinkGapMs: 550,
-  winkMinMs: 250,
-  winkMaxMs: 1500,
-  winkHoldMs: 700,
+export const GESTURES = ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT', 'BOTH_CLOSED'];
+
+export const DEFAULT_PARAMS = {
+  closeT: { L: 0.55, R: 0.55 },
+  openT: { L: 0.3, R: 0.3 },
+  otherMax: { left: 0.3, right: 0.3 }, // during a LEFT wink, the right eye must stay below this
+  asymMin: 0.4,
+  winkMinMs: 180,
+  holdMs: 800,
+  graceMs: 90,                 // tolerate a few noisy frames inside a wink
+  dbl: { closeMinMs: 50, closeMaxMs: 380, gapMaxMs: 450, quietMs: 250 }, // quiet rule: 6 sim hours showed longer windows cut catches, not false alarms
+  bothMs: 2000,
+  refractoryMs: 450,
   faceLostMs: 400,
+  enabled: Object.fromEntries(GESTURES.map((g) => [g, true])),
 };
 
 export class GestureEngine {
-  constructor(calibration, opts = {}) {
-    this.o = { ...DEFAULTS, ...opts };
-    this.setCalibration(calibration);
+  constructor(cal) {
+    this.setCalibration(cal);
     this.reset();
   }
 
   setCalibration(cal) {
     this.cal = cal;
-    if (!cal) return;
-    this.neutral = cal.neutral.mean.slice();
-    this.sd = cal.neutral.sd.map((s) => Math.max(s, 1e-4));
-    // direction templates in whitened space
-    this.dirVecs = {};
-    for (const d of DIRS) {
-      const m = cal.dirs[d];
-      if (!m) continue;
-      const v = m.map((x, i) => (x - cal.neutral.mean[i]) / this.sd[i]);
-      const n2 = v.reduce((a, b) => a + b * b, 0);
-      if (n2 > 4) this.dirVecs[d] = { v, n2 }; // needs >2 sd separation to be usable
-    }
-    // MediaPipe's left/right blink channels may be mirrored relative to the user; calibration detects it
-    this.swap = !!cal.swapEyes;
-    this.blinkCal = this.swap ? { L: cal.blink.R, R: cal.blink.L } : cal.blink;
-    const th = (e) => ({
-      close: e.open + this.o.closeFrac * (e.closed - e.open),
-      open: e.open + this.o.openFrac * (e.closed - e.open),
-    });
-    this.lid = { L: th(this.blinkCal.L), R: th(this.blinkCal.R) };
+    this.p = cal ? { ...DEFAULT_PARAMS, ...cal.params, enabled: { ...DEFAULT_PARAMS.enabled, ...(cal.params?.enabled || {}) } } : DEFAULT_PARAMS;
   }
 
   reset() {
-    this.filter = new OneEuroVec(this.o.minCutoff, this.o.beta);
-    this.closedL = this.closedR = false;
-    this.both = null;          // {start, longFired}
-    this.wink = null;          // {side, start, holdFired}
-    this.pendingShort = null;  // time a short both-eye blink ended (double blink candidate)
-    this.mutedUntil = 0;
-    this.cand = null;          // {dir, since}
-    this.held = null;          // {dir, since, lastRepeat}
+    this.closed = { L: false, R: false };
+    this.mode = 'none';
+    this.both = null;            // {start, longFired}
+    this.wink = null;            // {side, start, holdFired, lastOk}
+    this.pending = null;         // first blink of a possible double: {start, end}
+    this.lastClosureEnd = -Infinity;
+    this.lastT = null;
+    this.refractoryUntil = -Infinity;
     this.lastFace = -Infinity;
     this.faceLost = true;
-    this.state = { face: false, scores: {}, held: null, eyes: 'open', lidL: 0, lidR: 0 };
+    this.openEma = null;
+    this.driftSince = null;
+    this.driftFiredAt = -Infinity;
+    this.state = { face: false, eyes: 'open', c: { L: 0, R: 0 }, hold: null, both: 0 };
   }
 
   update(frame, t) {
     const ev = [];
-    const emit = (type, extra = {}) => ev.push({ type, t, ...extra });
     if (!this.cal) return ev;
+    const p = this.p;
+    const emit = (type, extra = {}, safety = false) => {
+      if (!p.enabled[type] && type in p.enabled) return false;
+      if (!safety && t < this.refractoryUntil) return false;
+      ev.push({ type, t, ...extra });
+      if (!safety || type === 'BOTH_CLOSED') this.refractoryUntil = t + p.refractoryMs;
+      this.pending = null;
+      return true;
+    };
 
-    // ---------------- face presence
+    // ---------- face presence (face-lock already picked the user's face, or said none/ambiguous)
     if (!frame || !frame.face) {
-      if (!this.faceLost && t - this.lastFace > this.o.faceLostMs) {
+      // a dropped frame or two is normal: keep the gesture in progress. Only a real loss resets.
+      if (!this.faceLost && t - this.lastFace > p.faceLostMs) {
+        if (this.wink?.holdFired === true) ev.push({ type: 'HOLD_END', t, side: this.wink.side });
+        this.wink = null; this.both = null; this.pending = null; this.closed = { L: false, R: false };
         this.faceLost = true;
-        this._endGaze(emit);
-        this.both = this.wink = this.pendingShort = null;
-        this.closedL = this.closedR = false;
         this.state.face = false;
-        emit('FACE_LOST');
+        this.state.hold = null; this.state.both = 0;
+        ev.push({ type: 'FACE_LOST', t });
       }
       return ev;
     }
     this.lastFace = t;
-    if (this.swap) frame = { ...frame, blinkL: frame.blinkR, blinkR: frame.blinkL, featEye: frame.featEye && { L: frame.featEye.R, R: frame.featEye.L } };
-    if (this.faceLost) {
-      this.faceLost = false;
-      this.state.face = true;
-      this.filter.reset();
-      emit('FACE_FOUND');
-    }
+    if (this.faceLost) { this.faceLost = false; this.state.face = true; ev.push({ type: 'FACE_FOUND', t }); }
 
-    // ---------------- eyelids (per-eye hysteresis)
-    const { L, R } = this.lid;
-    this.closedL = this.closedL ? frame.blinkL > L.open : frame.blinkL > L.close;
-    this.closedR = this.closedR ? frame.blinkR > R.open : frame.blinkR > R.close;
-    const fracL = (frame.blinkL - this.blinkCal.L.open) / (this.blinkCal.L.closed - this.blinkCal.L.open);
-    const fracR = (frame.blinkR - this.blinkCal.R.open) / (this.blinkCal.R.closed - this.blinkCal.R.open);
-    this.state.lidL = fracL; this.state.lidR = fracR;
-    const clearlyOpenL = frame.blinkL < L.open;
-    const clearlyOpenR = frame.blinkR < R.open;
+    // ---------- closure on this person's scale
+    let raw = frame.raw;
+    if (this.cal.swapB) raw = { ...raw, b: { L: raw.b.R, R: raw.b.L } };
+    const dt = this.lastT === null ? 33 : Math.min(100, t - this.lastT);
+    this.lastT = t;
+    const parts = {};
+    let c = closure(raw, this.cal.tf, parts);
+    if (this.cal.swapSides) c = { L: c.R, R: c.L };
+    this.state.c = c;
+    for (const e of ['L', 'R']) this.closed[e] = this.closed[e] ? c[e] > p.openT[e] : c[e] > p.closeT[e];
 
-    // double-blink window expiry
-    if (this.pendingShort !== null && t - this.pendingShort > this.o.doubleBlinkGapMs) this.pendingShort = null;
-
-    // both eyes closed
-    if (this.closedL && this.closedR) {
-      if (this.wink) { // a wink turned into a full close: cancel the wink
-        if (this.wink.holdFired) emit('WINK_HOLD_END', { side: this.wink.side });
-        this.wink = null;
-      }
-      if (!this.both) this.both = { start: t, longFired: false };
+    // ---------- both eyes closed
+    if (this.closed.L && this.closed.R) {
+      // a wink that already had >= 70 ms of clean one-eye closure survives a short blink of the other
+      // eye; a normal blink's leading eye (a few tens of ms) never gets that far
+      // a wink survives a short blink of the other eye. Only clean one-eye-closed time counts toward
+      // the wink, so the leading eye of a normal blink (a few tens of ms) can never add up to one.
+      if (!this.both) this.both = { start: t, longFired: false, fromWink: !!this.wink };
       const dur = t - this.both.start;
-      if (!this.both.longFired && dur >= this.o.longCloseMs) {
+      // during an established wink/hold the open eye still blinks naturally: tolerate a short blink
+      // of it. A wink that hasn't lasted winkMinMs yet is just the leading eye of a normal blink.
+      if (this.wink && (!this.both.fromWink || dur > OPEN_EYE_BLINK_MS)) {
+        if (this.wink.holdFired === true) ev.push({ type: 'HOLD_END', t, side: this.wink.side });
+        this.wink = null;
+        this.state.hold = null;
+      }
+      this.state.both = Math.min(1, dur / p.bothMs);
+      if (!this.both.longFired && dur >= p.bothMs) {
         this.both.longFired = true;
-        this.pendingShort = null;
-        emit('LONG_CLOSE');
+        emit('BOTH_CLOSED', {}, true);
       }
     } else if (this.both) {
-      // a full close just ended (first eye reopened)
-      const dur = t - this.both.start;
-      if (!this.both.longFired) {
-        if (dur >= this.o.deliberateBlinkMinMs && dur <= this.o.deliberateBlinkMaxMs) {
-          this.pendingShort = null;
-          emit('BLINK', { dur });
-        } else if (dur >= this.o.doubleBlinkMinMs && dur <= this.o.doubleBlinkMaxMs) {
-          if (this.pendingShort !== null) {
-            this.pendingShort = null;
-            emit('DOUBLE_BLINK');
-          } else {
-            this.pendingShort = t;
-          }
-        }
-      }
+      const { start, longFired, fromWink } = this.both;
+      const dur = t - start;
       this.both = null;
-      this.mutedUntil = t + this.o.postBlinkMuteMs;
-    }
-
-    // winks: exactly one eye closed AND the other clearly open
-    const winkSide = this.closedL && !this.closedR && clearlyOpenR ? 'left'
-      : this.closedR && !this.closedL && clearlyOpenL ? 'right' : null;
-    if (!this.both) {
-      if (winkSide && (!this.wink || this.wink.side !== winkSide)) {
-        if (this.wink?.holdFired) emit('WINK_HOLD_END', { side: this.wink.side });
-        this.wink = { side: winkSide, start: t, holdFired: false };
-      } else if (winkSide && this.wink) {
-        if (!this.wink.holdFired && t - this.wink.start >= this.o.winkHoldMs) {
-          this.wink.holdFired = true;
-          emit('WINK_HOLD_START', { side: winkSide });
+      this.state.both = 0;
+      const w = this.wink;
+      const we = w ? (w.side === 'left' ? 'L' : 'R') : null;
+      let blinkPath = !fromWink || !w;
+      if (w && this.closed[we]) {
+        w.lastOk = t; // the open eye blinked and reopened while the wink continued: resume the wink
+      } else if (w && w.clean >= LEAD_MS) {
+        // both eyes opened together: the wink ended during the other eye's blink
+        if (w.holdFired === true) ev.push({ type: 'HOLD_END', t, side: w.side });
+        else if (!w.holdFired && !this.closed.L && !this.closed.R && w.clean >= p.winkMinMs) {
+          emit(w.side === 'left' ? 'WINK_LEFT' : 'WINK_RIGHT', { side: w.side, dur: w.clean });
         }
-      } else if (!winkSide && this.wink) {
-        const dur = t - this.wink.start;
-        if (this.wink.holdFired) emit('WINK_HOLD_END', { side: this.wink.side });
-        // a wink is only a tap if it ended with BOTH eyes open (not by closing the other eye)
-        else if (!this.closedL && !this.closedR && dur >= this.o.winkMinMs && dur <= this.o.winkMaxMs) {
-          emit(this.wink.side === 'left' ? 'WINK_LEFT' : 'WINK_RIGHT', { dur });
-        }
-        this.wink = null;
-      }
-    }
-    this.state.eyes = this.both ? 'closed' : this.wink ? `wink-${this.wink.side}` : 'open';
-
-    // ---------------- gaze (only when both eyes are clearly open, or with one-eye clutch)
-    const f = this.filter.filter(frame.feat, t);
-    // clutch mode: while one eye is held shut, steer with the other eye alone
-    const oneEye = this.wink?.holdFired && frame.featEye ? frame.featEye[this.wink.side === 'left' ? 'R' : 'L'] : null;
-    const eyesUsable = (clearlyOpenL && clearlyOpenR) || !!oneEye;
-    if (!eyesUsable || t < this.mutedUntil) {
-      this.state.scores = {};
-      if (!this.wink?.holdFired) this._endGaze(emit, t < this.mutedUntil); // keep held gaze through brief blinks
-      return ev;
-    }
-    const feat = oneEye || f;
-    const z = feat.map((x, i) => (x - this.neutral[i]) / this.sd[i]);
-    const scores = {};
-    for (const d of DIRS) {
-      const dv = this.dirVecs[d];
-      if (!dv) continue;
-      let dot = 0;
-      for (let i = 0; i < z.length; i++) dot += z[i] * dv.v[i];
-      scores[d] = dot / dv.n2; // 1.0 == calibrated extent
-    }
-    this.state.scores = scores;
-    const ranked = Object.entries(scores).sort((a, b) => b[1] - a[1]);
-    const [best, bestS] = ranked[0] || [null, 0];
-    const second = ranked[1] ? ranked[1][1] : 0;
-
-    if (this.held) {
-      const s = scores[this.held.dir] ?? 0;
-      if (s < this.o.gazeExit) {
-        this._endGaze(emit);
-      } else if (this.o.repeatMs && t - this.held.lastRepeat >= this.o.repeatMs) {
-        this.held.lastRepeat = t;
-        emit('LOOK_REPEAT', { dir: this.held.dir });
-      }
-    }
-    if (!this.held) {
-      if (best && bestS >= this.o.gazeEnter && bestS - second >= this.o.dominance) {
-        if (!this.cand || this.cand.dir !== best) this.cand = { dir: best, since: t };
-        else if (t - this.cand.since >= this.o.gazeHoldMs) {
-          this.held = { dir: best, since: t, lastRepeat: t };
-          this.cand = null;
-          emit('LOOK_' + best.toUpperCase(), { dir: best });
-        }
+        if (w.clean >= p.winkMinMs) this.lastClosureEnd = t;
+        this.wink = null; this.state.hold = null;
       } else {
-        this.cand = null;
-        // relaxed: let neutral slowly track lighting / posture drift
-        if (bestS < 0.25) {
-          for (let i = 0; i < this.neutral.length; i++) {
-            this.neutral[i] += this.o.driftRate * (f[i] - this.neutral[i]);
+        // the "wink" was only the leading eye of an ordinary blink: treat it as a blink
+        this.wink = null; this.state.hold = null;
+        blinkPath = true;
+      }
+      if (blinkPath && !longFired) this._countBlink(start, t, emit);
+      else if (w && this.wink === w && !longFired) w.blink = { start, end: t }; // decide when the wink ends
+    }
+    // the second blink must START within the gap; don't expire while it is still closed
+    if (this.pending && !this.both && t - this.pending.end > p.dbl.gapMaxMs) this.pending = null;
+
+    // ---------- winks / holds: one eye closed, the other clearly open, clearly lopsided
+    if (!this.both) {
+      const sideOk = (side) => {
+        const e = side === 'left' ? 'L' : 'R', o = side === 'left' ? 'R' : 'L';
+        return this.closed[e] && c[o] < p.otherMax[side] && c[e] - c[o] >= p.asymMin;
+      };
+      const cand = sideOk('left') ? 'left' : sideOk('right') ? 'right' : null;
+      if (this.wink) {
+        const w = this.wink;
+        if (cand === w.side) { w.lastOk = t; w.clean += dt; }
+        if (!w.real && w.clean >= p.winkMinMs) { w.real = true; this.pending = null; } // a real wink between two blinks breaks a double blink
+        const stillClosed = this.closed[w.side === 'left' ? 'L' : 'R'];
+        const dur = t - w.start;
+        if (cand === w.side || (stillClosed && t - w.lastOk <= p.graceMs)) {
+          if (!w.holdFired && w.clean >= p.holdMs) { // clean one-eye time, so a blink can't stretch a wink into a hold
+            w.holdFired = emit(w.side === 'left' ? 'HOLD_LEFT' : 'HOLD_RIGHT', { side: w.side }) || 'blocked';
           }
+          this.state.hold = { side: w.side, frac: Math.min(1, w.clean / p.holdMs) };
+        } else {
+          // the wink ended. Only a clean ending (both eyes open again) counts as a wink.
+          const bothOpen = !this.closed.L && !this.closed.R;
+          if (w.real) this.lastClosureEnd = t;
+          else if (w.blink && w.clean < 2 * LEAD_MS) this._countBlink(w.blink.start, w.blink.end, emit); // it was just a lagging eye
+          if (w.holdFired === true) ev.push({ type: 'HOLD_END', t, side: w.side });
+          else if (!w.holdFired && bothOpen && w.clean >= p.winkMinMs) {
+            emit(w.side === 'left' ? 'WINK_LEFT' : 'WINK_RIGHT', { side: w.side, dur: w.clean });
+          }
+          this.wink = null;
+          this.state.hold = null;
         }
       }
+      if (!this.wink && cand) {
+        this.wink = { side: cand, start: t, holdFired: false, lastOk: t, real: false, clean: 0 };
+      }
     }
-    this.state.held = this.held?.dir ?? null;
-    this.state.cand = this.cand?.dir ?? null;
+    this.state.eyes = this.both ? 'closed' : this.wink ? `wink-${this.wink.side}` : (this.closed.L || this.closed.R) ? 'closing' : 'open';
+    if (!this.wink) this.state.hold = null;
+
+    // ---------- calibration drift (e.g. glasses taken off, very different lighting): tell, don't adapt
+    // each reading is watched on its own: taking glasses off shifts the blink score a lot but
+    // barely changes lid shape, so the combined value alone would hide it
+    if (this.state.eyes === 'open') {
+      const m = [(parts.L.nb + parts.R.nb) / 2, (parts.L.nr + parts.R.nr) / 2];
+      this.openEma = this.openEma === null ? m : this.openEma.map((v, i) => v + 0.02 * (m[i] - v));
+      if (Math.max(Math.abs(this.openEma[0]), Math.abs(this.openEma[1])) > 0.3) {
+        if (this.driftSince === null) this.driftSince = t;
+        if (t - this.driftSince > 8000 && t - this.driftFiredAt > 60000) {
+          this.driftFiredAt = t;
+          ev.push({ type: 'CALIBRATION_DRIFT', t, blinkScore: this.openEma[0], lidShape: this.openEma[1] });
+        }
+      } else this.driftSince = null;
+    }
     return ev;
   }
 
-  _endGaze(emit, soft = false) {
-    this.cand = null;
-    if (soft) return;
-    if (this.held) {
-      this.held = null;
-      emit('LOOK_END');
+  // an ordinary both-eyes closure: maybe half of a double blink, otherwise ignored
+  _countBlink(start, end, emit) {
+    const p = this.p;
+    const dur = end - start;
+    const short = dur >= p.dbl.closeMinMs && dur <= p.dbl.closeMaxMs;
+    if (short && this.pending && start - this.pending.end <= p.dbl.gapMaxMs) {
+      emit('DOUBLE_BLINK', { gap: start - this.pending.end });
+      this.pending = null;
+    } else if (short && start - this.lastClosureEnd >= p.dbl.quietMs) {
+      this.pending = { start, end };
+    } else {
+      this.pending = null;
     }
-    this.state.held = null;
+    this.lastClosureEnd = end;
   }
 }

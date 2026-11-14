@@ -25,9 +25,9 @@ Discrete eye gestures (look, blink, wink, hold) instead of a shaky gaze cursor, 
 
 ## Capabilities and Constraints
 - Modes: Home (four directions), Drive, Talk (5 replies + quick phrases), Play (Snake), Settings, Calibration.
-- Control profiles: Eyes only, Winks + blinks, Clutch (hold one eye shut to drive).
+- Inputs are eyelid gestures only: double blink, wink left/right, hold left/right, both eyes closed 2 s (always stop). Normal blinks and gaze are never inputs. Gesture-to-action mapping is provisional (app/src/mapping.js).
 - Safety: motors stop on face loss, 2 s eye close, disconnect, or 450 ms without a heartbeat.
-- Every target must be selectable by direction alone: at most 4 directions plus blink on any screen.
+- Per-person calibration (relaxed baseline + 5 reps per gesture) turns off gestures a person cannot do reliably. One user only (face lock).
 - Final product name is undecided (team will pick an acronym). Use "Butter" as the placeholder.
 
 ## Evidence on Hand

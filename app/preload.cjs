@@ -13,4 +13,5 @@ contextBridge.exposeInMainWorld('butterApi', {
   butterStatus: () => ipcRenderer.invoke('butter:status'),
   onButterStatus: (fn) => ipcRenderer.on('butter:status', (_e, s) => fn(s)),
   e2e: !!process.env.BUTTER_E2E,
+  calSpeed: Number(process.env.BUTTER_CAL_SPEED) || 1,
 });

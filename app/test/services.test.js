@@ -17,13 +17,13 @@ test('parseReplies handles fences, prose, objects, dupes, junk', () => {
   assert.throws(() => parseReplies('no json here'));
 });
 
-test('centerOut puts the most likely reply in the middle, 2nd/3rd adjacent', () => {
-  assert.deepEqual(centerOut(['1st', '2nd', '3rd', '4th', '5th']), ['4th', '2nd', '1st', '3rd', '5th']);
+test('centerOut puts the most likely of 3 replies in the middle', () => {
+  assert.deepEqual(centerOut(['1st', '2nd', '3rd']), ['2nd', '1st', '3rd']);
 });
 
 test('LLM falls back cleanly with no key, bad JSON, HTTP error, or timeout', async () => {
   const none = await createLLM({ apiKey: '' }).suggest({ conversation: [{ who: 'them', text: 'hi' }] });
-  assert.equal(none.source, 'offline'); assert.equal(none.replies.length, 5);
+  assert.equal(none.source, 'offline'); assert.equal(none.replies.length, 3);
 
   let calls = 0;
   const badJson = async () => { calls++; return new Response(JSON.stringify({ choices: [{ message: { content: 'oops' } }] })); };
@@ -126,7 +126,7 @@ test('butter client: connects, heartbeats keep motors on, stop is immediate, ser
 // ------------------------------------------------------------ LIVE APIs (run when keys are in the environment)
 const LIVE = !!(process.env.DEEPSEEK_API_KEY && process.env.ELEVENLABS_API_KEY);
 
-test('LIVE DeepSeek: realistic conversations give 5 short, distinct, on-topic replies fast', { skip: !LIVE && 'no keys' }, async () => {
+test('LIVE DeepSeek: realistic conversations give 3 short, distinct, on-topic replies fast', { skip: !LIVE && 'no keys' }, async () => {
   const llm = createLLM({ apiKey: process.env.DEEPSEEK_API_KEY });
   const cases = [
     { name: 'greeting', persona: 'I am Linh, 58, ALS. My daughter is Mai.', convo: [{ who: 'them', text: 'Hi Mom! How are you feeling today?' }], expect: /good|ok|tired|well|fine|better|love|mai|you/i },
@@ -141,8 +141,8 @@ test('LIVE DeepSeek: realistic conversations give 5 short, distinct, on-topic re
     times.push(r.ms);
     console.log(`  [${c.name}] ${r.ms}ms ${r.source} ->`, JSON.stringify(r.replies));
     assert.equal(r.source, 'deepseek-flash', `${c.name}: fell back: ${r.error}`);
-    assert.equal(r.replies.length, 5);
-    assert.equal(new Set(r.replies.map((x) => x.toLowerCase())).size, 5, 'distinct');
+    assert.equal(r.replies.length, 3);
+    assert.equal(new Set(r.replies.map((x) => x.toLowerCase())).size, 3, 'distinct');
     for (const x of r.replies) assert.ok(x.split(/\s+/).length <= 16, `too long: ${x}`);
     assert.ok(r.replies.some((x) => c.expect.test(x)), `${c.name}: off-topic ${r.replies}`);
     assert.ok(!r.replies.some((x) => /\bAI\b|language model|option/i.test(x)), 'no AI self-reference');

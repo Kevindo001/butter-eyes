@@ -1,26 +1,26 @@
 // Reply suggestions via DeepSeek (OpenAI-compatible API). Runs in the Electron main process only,
 // so the API key never reaches the renderer.
 //
-// suggest({ conversation, persona, voiceExamples }) -> { replies: string[5] (best first), ms, source }
+// suggest({ conversation, persona, voiceExamples }) -> { replies: string[3] (best first), ms, source }
 
 const URL = 'https://api.deepseek.com/chat/completions';
 
 export const FALLBACK = {
-  them: ["Yes", "No", "I'm not sure", "Can you say that again?", "Give me a moment"],
-  me: ["How are you?", "Thank you", "I love you", "Can you help me?", "I'm tired"],
+  them: ["Yes", "No", "Can you say that again?"],
+  me: ["How are you?", "Thank you", "Can you help me?"],
 };
 
-export const SYSTEM_PROMPT = `You write reply options for a person with ALS who cannot speak or move. They pick one option with their eyes and it is spoken aloud in their voice. Picking costs them effort, so the FIRST option must be the reply they most likely want.
+export const SYSTEM_PROMPT = `You write reply options for a person with ALS who cannot speak or move. They pick one option with their eyes and it is spoken aloud in their voice. Picking costs them effort, so the FIRST option must be the reply they most likely want; they only ever see three.
 
-Return ONLY JSON: {"replies": ["...", "...", "...", "...", "..."]}
+Return ONLY JSON: {"replies": ["...", "...", "..."]}
 
 Rules:
-- Exactly 5 replies, ordered from most likely to least likely.
+- Exactly 3 replies, ordered from most likely to least likely.
 - First person, spoken style, as the user. Usually 2-10 words. Never more than 14 words.
-- Make them genuinely different: e.g. a direct answer, the opposite answer, a question back, a need or request, a warm/emotional or playful one.
+- Make them genuinely different: usually the most likely answer, the opposite answer, and a question back or a need.
 - If the last line is from the other person (Them), reply to it.
 - If the last line is from the user (Me), the other person has NOT answered yet. Offer what the user might add next while waiting (a follow-up, an add-on, a new topic). Never answer the user's own question for the other person.
-- For yes/no questions include both a yes and a no. For scales or numbers (e.g. pain 1-10) spread the options across the range (low, medium, high) plus one non-number reply.
+- For yes/no questions include both a yes and a no. For scales or numbers (e.g. pain 1-10) spread the three options across the range (low, medium, high).
 - If the user's needs are urgent (pain, breathing, help), keep replies clear and literal; no jokes.
 - Match the relationship and mood of the conversation. Use the user's own style from their profile and past choices.
 - Never invent specific facts (times, places, names, medical details) that are not in the conversation or profile; ask instead.
@@ -73,7 +73,7 @@ export function createLLM({ apiKey, model = 'deepseek-flash', timeoutMs = 9000, 
           response_format: { type: 'json_object' },
           thinking: { type: 'disabled' }, // ~1.7 s instead of ~2.5 s+, same quality for this task
           temperature: 0.8,
-          max_tokens: 300,
+          max_tokens: 200,
         }),
       });
       if (!r.ok) throw new Error(`DeepSeek ${r.status}: ${(await r.text()).slice(0, 200)}`);
@@ -95,9 +95,9 @@ export function createLLM({ apiKey, model = 'deepseek-flash', timeoutMs = 9000, 
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
           const replies = parseReplies(await call(messages));
-          if (replies.length >= 3) {
-            while (replies.length < 5) replies.push(fallback[replies.length]);
-            return { replies: replies.slice(0, 5), ms: Date.now() - t0, source: model };
+          if (replies.length >= 2) {
+            while (replies.length < 3) replies.push(fallback.find((f) => !replies.includes(f)));
+            return { replies: replies.slice(0, 3), ms: Date.now() - t0, source: model };
           }
           lastErr = new Error('too few replies');
         } catch (e) {
@@ -110,9 +110,8 @@ export function createLLM({ apiKey, model = 'deepseek-flash', timeoutMs = 9000, 
   };
 }
 
-// Center-out layout: the most likely reply sits in the middle where the eyes already rest,
-// the 2nd/3rd most likely are one glance away. [4th, 2nd, 1st, 3rd, 5th]
+// Center layout: the most likely reply sits in the middle, where the selection starts.
+// [2nd, 1st, 3rd]
 export function centerOut(replies) {
-  const order = [3, 1, 0, 2, 4];
-  return order.map((i) => replies[i]).filter((x) => x !== undefined);
+  return [1, 0, 2].map((i) => replies[i]).filter((x) => x !== undefined);
 }

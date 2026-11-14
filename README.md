@@ -1,6 +1,6 @@
 # Butter: drive and talk with your eyes
 
-Webcam-only eye control for people with ALS / Parkinson's. Calibrate in 20 seconds, then drive a robot (stand-in for a wheelchair) and hold a spoken conversation using look, blink, wink and "close eyes" gestures. No eye-tracking hardware.
+Webcam-only eye control for people with ALS / Parkinson's. A 2-minute calibration learns your eyes; then you drive a robot (stand-in for a wheelchair) and hold a spoken conversation using deliberate eyelid gestures (double blink, winks, holds, eyes closed). No eye-tracking hardware.
 
 ```
 butter-eyes/
@@ -40,27 +40,37 @@ python3 camera_server.py           # only if your existing camera stream isn't r
 ```
 Then on the Mac `./start.sh` picks the Jetson up automatically. To start at boot later, see `butter-drive/butter-drive.service`.
 
-## Using it
+## Inputs (eyelid gestures only)
 
-| Gesture | Home | Drive (Eyes only) | Talk |
-|---|---|---|---|
-| Look up/down/left/right (hold ~0.3 s) | pick a tile | move while held (up = forward, down = back, left/right = turn) | left/right: choose reply · up: new replies · down: quick phrases |
-| Blink (0.35–1.2 s, deliberate) | open | start / park | say it |
-| Double blink | | | repeat last thing said |
-| Close eyes 2 s | | stop, then exit | home |
+Normal blinking and where you look are never inputs. Only these are:
 
-Other control styles (Settings): **Winks + blinks** (wink = turn, double blink = go/stop, matches the team's original idea) and **Clutch** (Carter's idea: hold one eye shut to drive, steer with the other, open both = instant stop). Keyboard mirrors every gesture for caregivers and as a demo backup: arrows, space, D, Esc, Q/E, Shift (clutch), C (recalibrate).
+| Gesture | What counts |
+|---|---|
+| Double blink | two quick, deliberate blinks |
+| Wink left / right | one eye closed briefly while the other stays open |
+| Hold left / right | one eye kept closed past your hold time (a ring fills on the eye display); fires while held |
+| Close both eyes 2 s | always stop / back, on every screen |
 
-Talk: the mic listens; when someone speaks, ElevenLabs Scribe transcribes it, DeepSeek writes 5 replies in about 1.2 s, the most likely in the middle (where the eyes already rest). The chosen reply is spoken with ElevenLabs (or through Butter's speaker: Settings, Voice). A caregiver can also type what was said. "About me" in Settings and every reply the user picks teach the AI how they talk. A cloned voice ID makes it speak in the user's own voice.
+What each gesture does per screen is provisional and lives in one table: `app/src/mapping.js`.
+Right now: Home: wink to move, double blink to open. Talk: wink to pick between 3 replies (most likely in the middle), double blink to say it, hold left for quick phrases, hold right for new replies. Drive: double blink twice to go (confirm step), once to stop, wink for a short turn, hold to keep turning.
 
-## Why the jitter is gone
+Keyboard backup (caregiver / demo): Q / E or arrow keys = wink left/right, Space = double blink, hold A / D = hold left/right, Esc = close both eyes, C = recalibrate.
 
-The old `eye_mouse.py` mapped gaze to a screen pixel. A webcam can't do better than about 125 px (its own calibration said so), so the cursor always shook. This app never places a cursor. It classifies a few deliberate gestures:
+## Calibration (about 2 minutes, per person)
 
-* MediaPipe blendshapes + iris position, One Euro filtered, whitened by your own calibration.
-* Each direction must pass an enter threshold, beat the runner-up direction, and be held 280 ms; it releases only below a lower exit threshold (hysteresis). Noise inside that band can't fire anything.
-* Gaze is ignored while the eyelids move (blinks drag the gaze estimate down), and the neutral point slowly re-centres to follow posture and lighting drift.
-* Directions your camera can't tell apart get disabled at calibration instead of misfiring.
+1. **Setup:** waits until there's one face, close enough, and no glare on glasses.
+2. **Relax (30 s):** read a paragraph, blink normally. This learns what "no command" looks like for you: resting eyelids, natural blink timing, glasses.
+3. **Close both eyes** until the chime: your fully-closed reference.
+4. **Each gesture 5 times.** It skips gestures you clearly can't do.
+5. **Report card:** the calibration recording is replayed through the fitted settings. Gestures that weren't reliable, or that fired while you were relaxed, are turned off.
+
+How it handles different eyes:
+- Each eye is measured two ways: MediaPipe's blink score, and lid gap divided by eye width (independent of eye size and distance).
+- Both are scaled to your own open-to-closed range, per eye, and combined. Whichever reading was steadier at calibration counts more, so glasses glare on one reading is down-weighted automatically.
+- It says "move closer" if your eyes are too few pixels, and warns about glare.
+- If your eyes later look different from calibration (glasses on/off), it suggests recalibrating. It never quietly re-learns.
+
+One user only: it locks onto the calibrated face, shows a small "Multiple faces detected" badge if someone else is in view, and pauses (Butter stops) only if it can't tell who is who.
 
 ## Safety (robot)
 
@@ -68,23 +78,28 @@ Motors stop when: the face is lost, eyes close 2 s, the app or Wi-Fi drops (450 
 
 ## Test results (Nov 14)
 
-* Gesture engine, 14 tests: 10 simulated minutes of relaxed staring with natural blinks, drift, spikes and dropped frames gives **zero** false commands (also at 1.5x noise); every gesture fires once, within 600 ms.
-* Robot server, 7 tests: H-bridge never gets IN1+IN2 high; watchdog stops within 250–500 ms; disconnect stops instantly.
-* Live DeepSeek eval: 12 real scenarios graded by a second model, **5.0 / 5**, about 1.2 s each; rule checks (yes and no offered, pain-scale spread, never answers its own question, no invented times) all pass.
-* ElevenLabs: voice to WAV to VAD to Scribe round trip is word-exact; TTS about 0.2 s.
-* Full app (Electron, headless): 18/18, run twice. Real MediaPipe on Anh's webcam frame (glasses on, 100% face detection), a real voice into the fake mic transcribed exactly, every drive profile checked against the robot's motor log, robot crash and reconnect, settings persistence, calibration refusing a face that never moves.
+* **Gesture engine + calibration (38 tests):** simulated people with glasses, small eyes, weak closure, droopy lids, partial winks and no winks, with realistic natural blinking (incl. quick natural pairs), noise, glare and dropped frames.
+  * 2 x 10 minutes relaxed per person: **zero** commands.
+  * 10,600 gestures: double blink 97%, winks 98-99%, holds and close-both 100% caught, **zero** confused for another gesture.
+  * The report card turns on exactly what each person can do (e.g. "can't wink" gets double blink + close-both only).
+  * Mirrored cameras, glasses taken off (recalibrate prompt), face loss mid-hold, one-frame dropouts.
+* **Face lock:** caregiver leaning in, overlapping faces, user leaving and a different face staying, user returning.
+* **Robot server (7 tests):** H-bridge never gets IN1+IN2 high; watchdog stops within 250-500 ms; disconnect stops instantly.
+* **Live DeepSeek eval:** 12 scenarios with 3 replies each, graded 4.9-5.0 / 5, about 1 s each.
+* **ElevenLabs:** voice to WAV to speech detection to Scribe round trip is word-exact.
+* **Full app (Electron, headless), 20/20:** real MediaPipe on Anh's webcam frame (glasses), a real two-face image (locks the closer face, shows the badge), real voice into the mic transcribed exactly, every drive gesture checked against the robot's motor log, confirm step and its 3 s expiry, robot crash and reconnect, calibration refusing a still photo.
 
 ## Open items to confirm
 
 1. **Jetson:** run `jetson_check.py`: wheel directions, the camera stream path on :5600, speaker card still `hw:2,0`.
-2. **Real eyes:** only a photo has been tracked so far. Do 3–4 calibrations on the demo laptop under venue-like light and note the direction scores (aim for at least 4). Vertical gaze is the weakest on webcams; if up/down score low, use the Winks profile for driving.
+2. **Real eyes:** gestures were tested on simulated people and a still photo, not live eyes yet. Calibrate each team member on the demo laptop under venue-like light and check the report cards.
 3. **Mic at the venue:** noisy rooms can trigger speech detection; the caregiver text box is the fallback.
 4. **Name / acronym:** placeholder "Butter".
 5. **Pitch facts:** "12 million with Parkinson's or ALS" and "eyes are the last muscles to go" are unverified; check them before saying them on stage.
 
 ## Demo script (2 min)
 
-1. Calibrate live (20 s). The result card shows how well each direction separates.
-2. Home: look up, blink: Drive. Blink to arm, look up: Butter rolls toward the judges. Close eyes 2 s: it stops.
-3. Close eyes again: Home. Look left, blink: Talk. A teammate says "Do you want to watch a movie tonight?"; replies appear about 1.5 s later; blink, and the reply is spoken.
-4. Settings: show Winks and Clutch for different stages of the disease.
+1. Calibrate live (show the relax step and the report card: "these are the gestures this person can use").
+2. Home: double blink Drive. Double blink twice: Butter rolls toward the judges. Wink to steer. Close eyes 2 s: it stops.
+3. Close eyes again: Home. Wink to Talk, double blink. A teammate says "Do you want to watch a movie tonight?"; 3 replies appear about a second later; double blink, and it's spoken.
+4. Point out: normal blinking and reading never trigger anything, and a second person walking into frame doesn't take over.

@@ -9,7 +9,7 @@ const KEY = process.env.DEEPSEEK_API_KEY;
 const SCENARIOS = [
   { id: 'daughter-hello', persona: 'Linh, 58, ALS for 3 years. Daughter Mai visits on weekends.', convo: [['them', 'Hi Mom! How are you feeling today?']] },
   { id: 'water', convo: [['them', 'Do you want some water?']], rule: (r) => r.some((x) => /^(yes|yeah|sure|please)/i.test(x)) && r.some((x) => /\b(no|not)\b/i.test(x)), ruleName: 'has a yes and a no' },
-  { id: 'pain-scale', convo: [['them', 'On a scale of 1 to 10, how bad is the pain right now?']], rule: (r) => { const W = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 }; const n = r.map((x) => { const m = x.toLowerCase().match(/\b(10|[1-9]|one|two|three|four|five|six|seven|eight|nine|ten)\b/); return m ? (W[m[1]] || +m[1]) : 0; }).filter(Boolean); return n.length >= 3 && Math.max(...n) - Math.min(...n) >= 4; }, ruleName: 'numbers spread across the scale' },
+  { id: 'pain-scale', convo: [['them', 'On a scale of 1 to 10, how bad is the pain right now?']], rule: (r) => { const W = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 }; const n = r.map((x) => { const m = x.toLowerCase().match(/\b(10|[1-9]|one|two|three|four|five|six|seven|eight|nine|ten)\b/); return m ? (W[m[1]] || +m[1]) : 0; }).filter(Boolean); return n.length >= 2 && Math.max(...n) - Math.min(...n) >= 4; }, ruleName: 'numbers spread across the scale' },
   { id: 'own-question', convo: [['them', 'The game is on tonight'], ['me', 'Who is playing?']], rule: (r) => !r.some((x) => /^(the |it'?s the |i think)/i.test(x)), ruleName: 'does not answer own question' },
   { id: 'doctor', convo: [['them', "I'm going to adjust your feeding tube now, is that okay?"]] },
   { id: 'breathing', convo: [['them', 'You look uncomfortable. Is it your breathing?']], rule: (r) => !r.some((x) => /lol|haha|😂/i.test(x)), ruleName: 'no jokes when urgent' },
@@ -22,7 +22,7 @@ const SCENARIOS = [
 ];
 
 const JUDGE = `You grade reply options for an AAC (augmentative communication) app used by a person with ALS. The user picks ONE option by eye and it is spoken in first person.
-Score the SET of 5 options from 1 to 5:
+Score the SET of 3 options from 1 to 5 (the user only ever sees these three):
 5 = the best option is exactly what most people would want to say; options are natural, short, distinct, cover different intents, fit who is talking and the mood; nothing invented.
 3 = usable but generic, repetitive, or one clear miss.
 1 = wrong speaker/perspective, off-topic, inappropriate, or invents facts.
