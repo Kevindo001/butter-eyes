@@ -1,0 +1,25 @@
+{
+  "name": "butter-eyes",
+  "productName": "Butter",
+  "version": "0.1.0",
+  "description": "Eye-gesture control for Butter + LLM-assisted speech, for people with ALS / Parkinson's. Webcam only.",
+  "type": "module",
+  "main": "main.cjs",
+  "scripts": {
+    "postinstall": "node scripts/fetch-model.js",
+    "start": "electron .",
+    "mock-butter": "python3 ../butter-drive/server.py --mock --port 8770",
+    "test": "node --test test/*.test.js",
+    "e2e": "node test/e2e/run-e2e.js"
+  },
+  "dependencies": {
+    "@fontsource/atkinson-hyperlegible-next": "^5.3.0",
+    "@mediapipe/tasks-vision": "0.10.21",
+    "lucide-static": "^1.73.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "playwright-core": "^1.65.1"
+  }
+}

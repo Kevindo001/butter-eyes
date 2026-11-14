@@ -1,0 +1,6 @@
+node_modules/
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+app/test/e2e/fixtures/

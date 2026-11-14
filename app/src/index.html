@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' app:; script-src 'self' app: 'wasm-unsafe-eval'; img-src 'self' app: data: blob: http: https:; media-src 'self' app: blob: data: mediastream:; style-src 'self' app: 'unsafe-inline'; connect-src 'self' app: data: blob:; worker-src 'self' app: blob:" />
+  <title>Butter</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo"></span>Butter</div>
+    <div class="pills">
+      <span class="pill" id="pillFace"><i></i><b>Face</b></span>
+      <span class="pill" id="pillButter"><i></i><b>Butter</b></span>
+      <span class="pill" id="pillAi"><i></i><b>Voice + AI</b></span>
+      <span class="pill dim" id="pillProfile">Eyes only</span>
+    </div>
+    <div class="hud">
+      <div class="radar" id="radar"><div class="ring"></div><div class="puck" id="puck"></div></div>
+      <div class="cam"><video id="video" playsinline muted></video><canvas id="camOverlay"></canvas></div>
+    </div>
+  </header>
+  <main id="main"></main>
+  <div id="toast" class="toast"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
