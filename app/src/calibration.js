@@ -265,8 +265,8 @@ export function quickCalibration(samples) {
   report.notes.push(...notes);
 
   const P = structuredClone(DEFAULT_PARAMS);
-  P.otherMax = { left: 0.42, right: 0.42 };
-  P.asymMin = 0.35;
+  P.otherMax = { left: 0.78, right: 0.78 }; // winks are judged by lopsidedness; the other eye may squint
+  P.asymMin = 0.28;
   // natural blink length -> how slow a "slow double blink" must be
   const ser = relaxed.map((f) => { const c = closure(f.raw, tf); return { t: f.t, cL: c.L, cR: c.R }; });
   const nat = closureIntervals(ser, (x) => Math.min(x.cL, x.cR), 0.55, 0.3);

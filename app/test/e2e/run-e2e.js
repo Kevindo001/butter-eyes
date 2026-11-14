@@ -204,12 +204,12 @@ try {
     await page.evaluate(() => { window.__butter.screens.home.i = 2; window.__butter.screens.home.render(); });
     await inject('DOUBLE_BLINK');
     assert(await screen() === 'settings', 'settings not open');
-    await inject('DOUBLE_BLINK'); // row 0: drive speed medium -> fast
-    await until(() => S('S.settings.driveSpeed === 0.5'), 3000, 'setting change');
-    assert(JSON.parse(fs.readFileSync(storePath, 'utf8')).settings.driveSpeed === 0.5, 'not persisted');
+    await inject('DOUBLE_BLINK'); // row 0: drive speed 10% -> 20%
+    await until(() => S('S.settings.driveSpeed === 0.2'), 3000, 'setting change');
+    assert(JSON.parse(fs.readFileSync(storePath, 'utf8')).settings.driveSpeed === 0.2, 'not persisted');
     assert((await page.content()).includes('Practice gestures'), 'no practice row');
     await shot('07-settings');
-    await page.evaluate(() => window.butterApi.saveSettings({ driveSpeed: 0.35 }).then((s) => { window.__butter.S.settings = s; }));
+    await page.evaluate(() => window.butterApi.saveSettings({ driveSpeed: 0.1 }).then((s) => { window.__butter.S.settings = s; }));
     await inject('BOTH_CLOSED');
   });
 

@@ -335,7 +335,7 @@ screens.settings = {
   rows() {
     const s = S.settings;
     return [
-      { k: 'driveSpeed', label: 'Drive speed', vals: [{ v: 0.25, l: 'Slow' }, { v: 0.35, l: 'Medium' }, { v: 0.5, l: 'Fast' }] },
+      { k: 'driveSpeed', label: 'Drive speed', vals: [{ v: 0.1, l: '10%' }, { v: 0.2, l: '20%' }, { v: 0.35, l: '35%' }] },
       { k: 'voiceOut', label: 'Voice comes out of', vals: [{ v: 'laptop', l: 'Laptop' }, { v: 'butter', l: 'Butter' }, { v: 'both', l: 'Both' }] },
       { k: 'recal', label: 'Recalibrate eyes', action: () => go('calibrate') },
       { k: 'practice', label: 'Practice gestures', action: () => go('practice') },

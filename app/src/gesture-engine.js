@@ -54,6 +54,7 @@ export class GestureEngine {
     this.both = null;            // {start, longFired}
     this.brow = null;            // {start, fired}
     this.wink = null;            // {side, start, holdFired, lastOk}
+    this.candSide = null; this.candSince = 0;
     this.pending = null;         // first blink of a possible double: {start, end}
     this.lastClosureEnd = -Infinity;
     this.lastT = null;
@@ -104,13 +105,20 @@ export class GestureEngine {
     let c = closure(raw, this.cal.tf, parts);
     if (this.cal.swapSides) c = { L: c.R, R: c.L };
     this.state.c = c;
-    // during a wink the open eye often droops part-way; it only counts as closed again relative to
-    // where it sat when the wink began (so its natural blinks are still seen, but the droop isn't)
-    const dyn = this.wink?.otherOpenT;
-    for (const e of ['L', 'R']) {
-      const openT = dyn && dyn.eye === e ? dyn.t : p.openT[e];
-      this.closed[e] = this.closed[e] ? c[e] > openT : c[e] > p.closeT[e];
-    }
+    for (const e of ['L', 'R']) this.closed[e] = this.closed[e] ? c[e] > p.openT[e] : c[e] > p.closeT[e];
+    // A wink is judged by how LOPSIDED the eyes are, not by the other eye staying open: when most
+    // people wink, the other eye squints half shut and the winking eye closes less than in a blink.
+    // While the eyes are clearly lopsided, the less-closed eye counts as open.
+    const lopsided = (side) => {
+      const e = side === 'left' ? 'L' : 'R', o = side === 'left' ? 'R' : 'L';
+      const held = this.wink?.side === side; // easier to stay in a wink than to start one
+      return c[e] > p.closeT[e] - (held ? 0.2 : 0.1) && c[o] < p.otherMax[side] && c[e] - c[o] >= p.asymMin - (held ? 0.08 : 0);
+    };
+    let cand = lopsided('left') ? 'left' : lopsided('right') ? 'right' : null;
+    // once both eyes are closed (the stop gesture), a noisy lopsided frame or two must not break it
+    if (cand !== this.candSide) { this.candSide = cand; this.candSince = t; }
+    if (cand && this.both && !this.wink && t - this.candSince < 150) cand = null;
+    if (cand) { this.closed[cand === 'left' ? 'L' : 'R'] = true; this.closed[cand === 'left' ? 'R' : 'L'] = false; }
 
     // ---------- both eyes closed
     if (this.closed.L && this.closed.R) {
@@ -164,11 +172,6 @@ export class GestureEngine {
 
     // ---------- winks / holds: one eye closed, the other clearly open, clearly lopsided
     if (!this.both) {
-      const sideOk = (side) => {
-        const e = side === 'left' ? 'L' : 'R', o = side === 'left' ? 'R' : 'L';
-        return this.closed[e] && c[o] < p.otherMax[side] && c[e] - c[o] >= p.asymMin;
-      };
-      const cand = sideOk('left') ? 'left' : sideOk('right') ? 'right' : null;
       if (this.wink) {
         const w = this.wink;
         if (cand === w.side) { w.lastOk = t; w.clean += dt; }
@@ -193,11 +196,7 @@ export class GestureEngine {
           this.state.hold = null;
         }
       }
-      if (!this.wink && cand) {
-        const o = cand === 'left' ? 'R' : 'L';
-        this.wink = { side: cand, start: t, holdFired: false, lastOk: t, real: false, clean: 0,
-          otherOpenT: { eye: o, t: Math.min(p.closeT[o] - 0.05, Math.max(p.openT[o], c[o] + 0.12)) } };
-      }
+      if (!this.wink && cand) this.wink = { side: cand, start: t, holdFired: false, lastOk: t, real: false, clean: 0 };
     }
     this.state.eyes = this.both ? 'closed' : this.wink ? `wink-${this.wink.side}` : (this.closed.L || this.closed.R) ? 'closing' : 'open';
     if (!this.wink) this.state.hold = null;
