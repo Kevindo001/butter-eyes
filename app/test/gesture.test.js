@@ -220,6 +220,16 @@ test('an expressive eyebrow raise (even 2.5 s) does not toggle; a 4 s hold does,
   assert.deepEqual(types(feed([...sim.run([[5000, { brow: 1 }]]), ...sim.run([[800, {}]])])), ['BROW_HOLD']);
 });
 
+test('eyebrow navigation (Talk): quick raise = BROW_TAP, 1 s hold = BROW_SELECT only; off elsewhere', () => {
+  const { sim, feed, eng } = setup('typical', 23);
+  sim.setNatural(false);
+  assert.deepEqual(types(feed([...sim.run([[400, { brow: 1 }]]), ...sim.run([[800, {}]])])), [], 'off by default');
+  eng.browNav = true;
+  assert.deepEqual(types(feed([...sim.run([[400, { brow: 1 }]]), ...sim.run([[800, {}]])])), ['BROW_TAP']);
+  assert.deepEqual(types(feed([...sim.run([[1600, { brow: 1 }]]), ...sim.run([[800, {}]])])), ['BROW_SELECT']);
+  assert.deepEqual(types(feed([...sim.run([[5000, { brow: 1 }]]), ...sim.run([[800, {}]])])), ['BROW_SELECT', 'BROW_HOLD']);
+});
+
 // ------------------------------------------------------------------ quick calibration (what the app uses)
 function quickSetup(persona, seed, { reactMs = 350 } = {}) {
   const sim = makeSim({ seed, persona });

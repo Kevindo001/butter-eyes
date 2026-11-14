@@ -9,6 +9,7 @@ export const MAP = {
     WINK_LEFT: 'prev', WINK_RIGHT: 'next', DOUBLE_BLINK: 'open',
   },
   talk: {
+    BROW_TAP: 'cycle', BROW_SELECT: 'say',   // the simple way: quick eyebrow raise = next option, hold 1 s = say it
     WINK_LEFT: 'prev', WINK_RIGHT: 'next', DOUBLE_BLINK: 'say',
     HOLD_LEFT: 'quickPhrases', HOLD_RIGHT: 'newReplies',
   },
@@ -25,8 +26,8 @@ export const MAP = {
 
 // What the on-screen hints call each gesture
 export const NAMES = {
-  DOUBLE_BLINK: 'double blink', WINK_LEFT: 'wink left', WINK_RIGHT: 'wink right',
-  HOLD_LEFT: 'hold left eye', HOLD_RIGHT: 'hold right eye', BOTH_CLOSED: 'close both eyes 2 s', BROW_HOLD: 'raise eyebrows 2 s',
+  BROW_TAP: 'quick eyebrow raise', BROW_SELECT: 'hold eyebrows 1 s', DOUBLE_BLINK: 'double blink', WINK_LEFT: 'wink left', WINK_RIGHT: 'wink right',
+  HOLD_LEFT: 'hold left eye', HOLD_RIGHT: 'hold right eye', BOTH_CLOSED: 'close both eyes 3 s', BROW_HOLD: 'raise eyebrows 4 s',
 };
 
 export function actionFor(screen, type) { return MAP[screen]?.[type] ?? null; }

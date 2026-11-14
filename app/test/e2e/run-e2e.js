@@ -267,6 +267,19 @@ try {
     assert(await S('screens.talk.reqId') > before, 'no refresh');
   });
 
+  await check('talk: eyebrow raise cycles the 3 options (wraps), eyebrow hold says the focused one', async () => {
+    await until(() => S('!screens.talk.loading && screens.talk.options.length === 3'), 15000, 'replies');
+    const f0 = await S('screens.talk.focus');
+    const seen = [];
+    for (let i = 0; i < 3; i++) { await inject('BROW_TAP'); seen.push(await S('screens.talk.focus')); }
+    assert(seen[2] === f0 && new Set(seen).size === 3, 'cycle wrong: ' + f0 + ' -> ' + seen);
+    await inject('BROW_TAP');
+    const want = await S('screens.talk.options[screens.talk.focus]');
+    await inject('BROW_SELECT');
+    await until(() => S(`screens.talk.convo.some(m => m.who === 'me' && m.text === ${JSON.stringify(want)})`), 5000, 'said by eyebrow hold');
+    return want;
+  });
+
   await check('talk -> home (eyes closed 2 s); snake turns relative to its heading on winks', async () => {
     await inject('BOTH_CLOSED');
     assert(await screen() === 'home', 'not home');

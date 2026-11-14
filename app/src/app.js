@@ -32,17 +32,40 @@ function toast(msg, ms = 2400) {
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), ms);
 }
 const flash = document.createElement('div'); flash.className = 'flash'; document.body.append(flash);
+// ---- tones: every recognised input makes a sound, so you know it landed without reading the screen
+let actx = null;
+function beep(freq = 880, ms = 250, delay = 0, vol = 0.2) {
+  try {
+    actx ??= new AudioContext();
+    if (actx.state === 'suspended') actx.resume();
+    const t = actx.currentTime + delay / 1000, o = actx.createOscillator(), g = actx.createGain();
+    o.frequency.value = freq; g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + ms / 1000);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + ms / 1000);
+  } catch {}
+}
+const TONES = {
+  nav: () => beep(700, 70),                                   // moved to another option
+  select: () => { beep(880, 90); beep(1320, 150, 90); },      // chose / activated something
+  hold: () => beep(600, 160),                                 // one-eye hold registered
+  back: () => { beep(520, 120); beep(390, 200, 120); },       // exit / home
+  stop: () => beep(300, 180),                                 // quick stop
+  on: () => { beep(660, 110); beep(990, 180, 110); },         // eye control on
+  off: () => { beep(990, 110); beep(660, 180, 110); },        // eye control off
+};
+const TONE_FOR = { BROW_TAP: 'nav', WINK_LEFT: 'nav', WINK_RIGHT: 'nav', BROW_SELECT: 'select', DOUBLE_BLINK: 'select', HOLD_LEFT: 'hold', HOLD_RIGHT: 'hold', BOTH_CLOSED: 'back', LONG_BLINK: 'stop' };
+
 function pulse() { flash.classList.remove('go'); void flash.offsetWidth; flash.classList.add('go'); }
 
-const LABEL = { BROW_HOLD: 'Eyebrows', DOUBLE_BLINK: 'Double blink', WINK_LEFT: 'Wink left', WINK_RIGHT: 'Wink right', HOLD_LEFT: 'Hold left', HOLD_RIGHT: 'Hold right', BOTH_CLOSED: 'Eyes closed' };
+const LABEL = { BROW_TAP: 'Eyebrow raise', BROW_SELECT: 'Eyebrow hold', BROW_HOLD: 'Eyebrows', DOUBLE_BLINK: 'Double blink', WINK_LEFT: 'Wink left', WINK_RIGHT: 'Wink right', HOLD_LEFT: 'Hold left', HOLD_RIGHT: 'Hold right', BOTH_CLOSED: 'Eyes closed' };
 
 // ============================================================ input bus
 function dispatch(ev) {
   if (S.calibrating && ev.src !== 'test') return;
-  if (ev.type === 'BROW_HOLD' && S.screenName !== 'practice') { setControl(!S.control); pulse(); return; }
+  if (ev.type === 'BROW_HOLD' && S.screenName !== 'practice') { setControl(!S.control); TONES[S.control ? 'on' : 'off'](); pulse(); return; }
   // eye control off: nothing fires except the safety stop and status events
   if (!S.control && ev.src !== 'key' && !['BOTH_CLOSED', 'LONG_BLINK', 'FACE_LOST', 'FACE_FOUND', 'CALIBRATION_DRIFT'].includes(ev.type)) return;
   S.log.push({ type: ev.type, t: Math.round(ev.t), screen: S.screenName });
+  if (TONE_FOR[ev.type] && !(ev.type === 'LONG_BLINK' && S.screenName !== 'drive')) TONES[TONE_FOR[ev.type]]();
   if (S.log.length > 300) S.log.shift();
   if (LABEL[ev.type]) { pulse(); const g = $('#lastGesture'); if (g) { g.textContent = LABEL[ev.type]; g.classList.remove('show'); void g.offsetWidth; g.classList.add('show'); } }
   if (ev.type === 'CALIBRATION_DRIFT') { S.status.drift = true; paintPills(); toast('Your eyes look different from calibration (glasses on or off?). Recalibrate in Settings.', 5000); return; }
@@ -59,7 +82,7 @@ function setControl(on) {
 }
 
 // keyboard = caregiver / demo backup, same gestures
-const KEYMAP = { s: 'LONG_BLINK', q: 'WINK_LEFT', ArrowLeft: 'WINK_LEFT', e: 'WINK_RIGHT', ArrowRight: 'WINK_RIGHT', ' ': 'DOUBLE_BLINK', Escape: 'BOTH_CLOSED' };
+const KEYMAP = { ArrowUp: 'BROW_TAP', ArrowDown: 'BROW_SELECT', s: 'LONG_BLINK', q: 'WINK_LEFT', ArrowLeft: 'WINK_LEFT', e: 'WINK_RIGHT', ArrowRight: 'WINK_RIGHT', ' ': 'DOUBLE_BLINK', Escape: 'BOTH_CLOSED' };
 const HOLDKEYS = { a: 'left', d: 'right' };
 addEventListener('keydown', (e) => {
   if (e.target.matches('input, textarea') || e.repeat) return;
@@ -211,8 +234,8 @@ const QUICK = [
 ];
 screens.talk = {
   convo: [], options: [], focus: 1, quick: false, qfocus: 0, reqId: 0, loading: false, info: '',
-  enter() { this.render(); this.startMic(); if (!this.options.length) this.refresh(); },
-  exit() { if (mic) mic.muted = true; },
+  enter() { if (S.engine) S.engine.browNav = true; this.render(); this.startMic(); if (!this.options.length) this.refresh(); },
+  exit() { if (S.engine) S.engine.browNav = false; if (mic) mic.muted = true; },
   async startMic() {
     if (mic) { mic.muted = false; return; }
     if (!S.store.keys.elevenlabs) { this.info = 'Speech-to-text off (no ElevenLabs key). Type below instead.'; this.paintBar(); return; }
@@ -258,7 +281,7 @@ screens.talk = {
       <div id="opts"></div>
       <div class="talkbar"><span class="ico">${ICONS.mic}</span><div class="meter" id="meter"><div></div></div><span id="info"></span>
         <input id="typeIn" placeholder="Caregiver: type what was said and press Enter" /></div>
-      ${hintRow('talk', { prev: 'left', next: 'right', say: 'say it', quickPhrases: 'quick phrases', newReplies: 'new replies', back: 'home' })}
+      ${hintRow('talk', { cycle: 'next option', prev: 'left', next: 'right', say: 'say it', quickPhrases: 'quick phrases', newReplies: 'new replies', back: 'home' })}
     </div></section>`;
     const c = $('#convo'); c.scrollTop = c.scrollHeight;
     $('#typeIn').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.value.trim()) { this.heard(e.target.value.trim()); e.target.value = ''; } });
@@ -278,6 +301,11 @@ screens.talk = {
   },
   on(ev) {
     const a = actionFor('talk', ev.type);
+    if (a === 'cycle') { // eyebrows: step through the options, wrapping round
+      if (this.quick) this.qfocus = (this.qfocus + 1) % QUICK.length;
+      else if (this.options.length) this.focus = (this.focus + 1) % this.options.length;
+      this.paintOptions(); return true;
+    }
     if (a === 'prev' || a === 'next') {
       const d = a === 'next' ? 1 : -1;
       if (this.quick) this.qfocus = (this.qfocus + d + QUICK.length) % QUICK.length;
@@ -390,13 +418,6 @@ function speak(text) {
     speechSynthesis.cancel(); speechSynthesis.speak(u);
     setTimeout(res, 6000);
   });
-}
-function beep(freq = 880, ms = 250) {
-  try {
-    const c = new AudioContext(), o = c.createOscillator(), g = c.createGain();
-    o.frequency.value = freq; g.gain.setValueAtTime(0.2, c.currentTime); g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + ms / 1000);
-    o.connect(g).connect(c.destination); o.start(); o.stop(c.currentTime + ms / 1000);
-  } catch {}
 }
 screens.calibrate = {
   enter() {
@@ -518,7 +539,7 @@ screens.practice = {
     this.events.push({ type: ev.type, t: Math.round(ev.t - this.t0), src: ev.src });
     if (PRACTICE.some((p) => p.g === ev.type)) {
       this.counts[ev.type] = (this.counts[ev.type] || 0) + 1;
-      beep(ev.type === 'BOTH_CLOSED' ? 520 : 990, 120);
+      if (ev.type === 'BROW_HOLD') TONES.select();
       this.render();
       const el = main.querySelector(`[data-g="${ev.type}"]`); el?.classList.add('focus'); setTimeout(() => el?.classList.remove('focus'), 600);
     }
@@ -538,6 +559,7 @@ function chime() {
 // ============================================================ tracking + HUD
 function startEngine(cal) {
   S.engine = new GestureEngine(cal);
+  S.engine.browNav = S.screenName === 'talk';
   if (cal.signature) S.tracker?.lock.setSignature(cal.signature);
 }
 

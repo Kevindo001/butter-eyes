@@ -19,6 +19,7 @@ const OPEN_EYE_BLINK_MS = 350;
 const LEAD_MS = 70; // in an ordinary blink one eye can lead the other by a few tens of ms
 
 export const GESTURES = ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT', 'BROW_HOLD', 'BOTH_CLOSED'];
+export const BROW_TAP_MIN_MS = 120, BROW_SELECT_MS = 1000; // quick eyebrow raise = next, 1 s hold = select
 export const LONG_BLINK_MS = 500; // a deliberate long blink: used only as a quick stop while driving
 
 export const DEFAULT_PARAMS = {
@@ -40,6 +41,7 @@ export const DEFAULT_PARAMS = {
 export class GestureEngine {
   constructor(cal) {
     this.setCalibration(cal);
+    this.browNav = false; // the app turns this on for screens navigated by eyebrows
     this.reset();
   }
 
@@ -212,7 +214,13 @@ export class GestureEngine {
         if (!this.brow) this.brow = { start: t, fired: false };
         this.state.brow = Math.min(1, (t - this.brow.start) / p.brow.ms);
         if (!this.brow.fired && t - this.brow.start >= p.brow.ms) { this.brow.fired = true; ev.push({ type: 'BROW_HOLD', t }); }
-      } else { this.brow = null; this.state.brow = 0; }
+        // eyebrow navigation (only where the app turns it on, e.g. Talk): held ~1 s = select
+        if (this.browNav && !this.brow.selected && t - this.brow.start >= BROW_SELECT_MS) { this.brow.selected = true; ev.push({ type: 'BROW_SELECT', t }); }
+      } else {
+        // ...and a quick raise-and-release = next
+        if (this.browNav && this.brow && !this.brow.selected && t - this.brow.start >= BROW_TAP_MIN_MS) ev.push({ type: 'BROW_TAP', t });
+        this.brow = null; this.state.brow = 0;
+      }
     }
 
     // ---------- calibration drift (e.g. glasses taken off, very different lighting): tell, don't adapt
