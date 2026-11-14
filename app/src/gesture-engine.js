@@ -2,10 +2,12 @@
 // Gesture engine v3: eyelid gestures only. Pure logic (no DOM) so it runs in Node tests.
 //
 // Inputs (everything else is ignored, including normal blinks and where the eyes look):
-//   DOUBLE_BLINK          two quick, deliberate blinks
+//   DOUBLE_BLINK          two slow, deliberate blinks (each longer than the person's natural blinks)
 //   WINK_LEFT / RIGHT     one eye closed briefly while the other stays open
 //   HOLD_LEFT / RIGHT     one eye held closed past holdMs (fires while held); HOLD_END on release
+//   BROW_HOLD             eyebrows raised and held >= brow.ms (turns eye control on / off)
 //   BOTH_CLOSED           both eyes closed >= bothMs (universal stop / back; always allowed)
+//   LONG_BLINK            both eyes closed >= 500 ms (not a calibrated gesture: quick stop while driving)
 // Status events: FACE_LOST, FACE_FOUND, CALIBRATION_DRIFT
 //
 // Frame: { face: bool, raw: { b:{L,R}, r:{L,R} } }   (raw readings, see closure.js)
@@ -16,7 +18,8 @@ import { closure } from './closure.js';
 const OPEN_EYE_BLINK_MS = 350;
 const LEAD_MS = 70; // in an ordinary blink one eye can lead the other by a few tens of ms
 
-export const GESTURES = ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT', 'BOTH_CLOSED'];
+export const GESTURES = ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT', 'BROW_HOLD', 'BOTH_CLOSED'];
+export const LONG_BLINK_MS = 500; // a deliberate long blink: used only as a quick stop while driving
 
 export const DEFAULT_PARAMS = {
   closeT: { L: 0.55, R: 0.55 },
@@ -26,8 +29,9 @@ export const DEFAULT_PARAMS = {
   winkMinMs: 180,
   holdMs: 800,
   graceMs: 90,                 // tolerate a few noisy frames inside a wink
-  dbl: { closeMinMs: 50, closeMaxMs: 380, gapMaxMs: 450, quietMs: 250 }, // quiet rule: 6 sim hours showed longer windows cut catches, not false alarms
+  dbl: { closeMinMs: 250, closeMaxMs: 650, gapMaxMs: 600, quietMs: 250 }, // two slow blinks, each longer than a natural blink
   bothMs: 2000,
+  brow: { on: 0.45, off: 0.3, ms: 1500 },
   refractoryMs: 450,
   faceLostMs: 400,
   enabled: Object.fromEntries(GESTURES.map((g) => [g, true])),
@@ -48,6 +52,7 @@ export class GestureEngine {
     this.closed = { L: false, R: false };
     this.mode = 'none';
     this.both = null;            // {start, longFired}
+    this.brow = null;            // {start, fired}
     this.wink = null;            // {side, start, holdFired, lastOk}
     this.pending = null;         // first blink of a possible double: {start, end}
     this.lastClosureEnd = -Infinity;
@@ -58,7 +63,7 @@ export class GestureEngine {
     this.openEma = null;
     this.driftSince = null;
     this.driftFiredAt = -Infinity;
-    this.state = { face: false, eyes: 'open', c: { L: 0, R: 0 }, hold: null, both: 0 };
+    this.state = { face: false, eyes: 'open', c: { L: 0, R: 0 }, hold: null, both: 0, brow: 0 };
   }
 
   update(frame, t) {
@@ -79,7 +84,7 @@ export class GestureEngine {
       // a dropped frame or two is normal: keep the gesture in progress. Only a real loss resets.
       if (!this.faceLost && t - this.lastFace > p.faceLostMs) {
         if (this.wink?.holdFired === true) ev.push({ type: 'HOLD_END', t, side: this.wink.side });
-        this.wink = null; this.both = null; this.pending = null; this.closed = { L: false, R: false };
+        this.wink = null; this.both = null; this.brow = null; this.pending = null; this.closed = { L: false, R: false };
         this.faceLost = true;
         this.state.face = false;
         this.state.hold = null; this.state.both = 0;
@@ -117,6 +122,7 @@ export class GestureEngine {
         this.state.hold = null;
       }
       this.state.both = Math.min(1, dur / p.bothMs);
+      if (!this.both.midFired && !this.both.fromWink && dur >= LONG_BLINK_MS) { this.both.midFired = true; ev.push({ type: 'LONG_BLINK', t }); }
       if (!this.both.longFired && dur >= p.bothMs) {
         this.both.longFired = true;
         emit('BOTH_CLOSED', {}, true);
@@ -188,6 +194,17 @@ export class GestureEngine {
     this.state.eyes = this.both ? 'closed' : this.wink ? `wink-${this.wink.side}` : (this.closed.L || this.closed.R) ? 'closing' : 'open';
     if (!this.wink) this.state.hold = null;
 
+    // ---------- eyebrows raised and held
+    if (this.cal.brow && typeof raw.brow === 'number' && p.enabled.BROW_HOLD) {
+      const n = (raw.brow - this.cal.brow.rest) / (this.cal.brow.raised - this.cal.brow.rest);
+      const up = this.brow ? n > p.brow.off : n > p.brow.on;
+      if (up) {
+        if (!this.brow) this.brow = { start: t, fired: false };
+        this.state.brow = Math.min(1, (t - this.brow.start) / p.brow.ms);
+        if (!this.brow.fired && t - this.brow.start >= p.brow.ms) { this.brow.fired = true; ev.push({ type: 'BROW_HOLD', t }); }
+      } else { this.brow = null; this.state.brow = 0; }
+    }
+
     // ---------- calibration drift (e.g. glasses taken off, very different lighting): tell, don't adapt
     // each reading is watched on its own: taking glasses off shifts the blink score a lot but
     // barely changes lid shape, so the combined value alone would hide it
@@ -209,7 +226,8 @@ export class GestureEngine {
   _countBlink(start, end, emit) {
     const p = this.p;
     const dur = end - start;
-    const short = dur >= p.dbl.closeMinMs && dur <= p.dbl.closeMaxMs;
+    if (dur < p.dbl.closeMinMs) return; // a natural blink: as if it never happened
+    const short = dur <= p.dbl.closeMaxMs;
     if (short && this.pending && start - this.pending.end <= p.dbl.gapMaxMs) {
       emit('DOUBLE_BLINK', { gap: start - this.pending.end });
       this.pending = null;

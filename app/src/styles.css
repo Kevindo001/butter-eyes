@@ -46,6 +46,9 @@
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
+/* sharp corners on every box; only the eye display stays round */
+*, *::before, *::after { border-radius: 0 !important; }
+.eyeball, .eyeball span, .center .eye, .center .eye div { border-radius: 50% !important; }
 html, body { margin: 0; height: 100%; overflow: hidden; user-select: none; }
 body {
   display: flex; flex-direction: column;
@@ -69,10 +72,11 @@ svg { display: block; }
 .logo { width: 26px; height: 26px; border-radius: 9px; background: var(--lamp); box-shadow: inset 0 -3px 0 var(--lamp-deep); }
 .pills { display: flex; gap: 8px; flex: 1; }
 .pill { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; color: var(--ink-2); padding: 7px 14px 7px 12px; border-radius: 999px; background: var(--linen); border: 1px solid var(--line); }
-.pill i { width: 9px; height: 9px; border-radius: 50%; background: var(--stop); }
-.pill.on i { background: var(--go); }
-.pill.warn i { background: var(--lamp-deep); }
 .pill b { font-weight: 500; }
+.pill i { display: none; }
+.pill.status { background: var(--stop-soft); border-color: var(--stop); color: var(--stop); }
+.pill.status.on { background: var(--go-soft); border-color: var(--go); color: oklch(36% 0.1 152); }
+.pill.status.warn { background: oklch(97% 0.04 92); border-color: var(--lamp-deep); color: var(--lamp-ink); }
 .pill.dim { color: var(--ink); background: var(--wall-2); }
 .hud { display: flex; gap: 12px; align-items: center; }
 /* eye-state display: each eye's lid closes as Butter sees it; a ring fills while holding */
@@ -86,7 +90,6 @@ svg { display: block; }
 .last.show { animation: lastg 1.6s var(--ease); }
 @keyframes lastg { 10%, 70% { opacity: 1; } }
 .pill.note { background: oklch(97% 0.04 92); border-color: var(--lamp-deep); color: var(--lamp-ink); }
-.pill.note i { background: var(--lamp-deep); }
 .cam { position: relative; width: 108px; height: 60px; border-radius: 14px; overflow: hidden; background: var(--night); box-shadow: var(--shadow); }
 .cam video, .cam canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
 
@@ -126,18 +129,29 @@ h2 { font-size: 20px; margin: 4px 0 0; color: var(--ink-2); font-weight: 500; }
 .center .eye div { width: 38px; height: 38px; border-radius: 50%; background: var(--ink); border: 8px solid var(--lamp); }
 
 /* ---------------------------------------------------------------- drive */
-.drive { flex: 1; display: grid; grid-template-columns: 1fr 360px; gap: 24px; min-height: 0; }
+.drivescreen { flex-direction: row; gap: 22px; padding-top: 22px; }
+.drivescreen .feed { flex: 1; min-width: 0; }
+.sidebar { width: 24%; min-width: 250px; max-width: 320px; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+.sidecard { background: var(--go-soft); border: 2px solid var(--go); border-radius: 20px; padding: 16px 20px; display: flex; flex-direction: column; gap: 2px; }
+.sidecard small { font-size: 14px; font-weight: 700; color: var(--ink-2); }
+.sidecard b { font-size: 34px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
+.sidecard span { font-size: 14px; color: var(--ink-2); }
+.sidecard.off { background: var(--wall-2); border-color: var(--oak-line); }
+.sidecard.off b { color: var(--ink-3); }
+.sidecard.dim { background: var(--linen); border-color: var(--line); }
+.sidecard.dim b { font-size: 24px; }
+.sidebar .dpad { aspect-ratio: auto; height: 170px; flex: none; }
+.sidebar .dpad > div { font-size: 24px; border-radius: 14px; }
+.sidebar .legend { font-size: 15px; line-height: 1.7; padding: 14px 18px; }
 .feed { background: var(--night); border-radius: var(--r); position: relative; overflow: hidden; border: 3px solid var(--oak); box-shadow: var(--shadow); transition: border-color .25s; }
 .feed img { width: 100%; height: 100%; object-fit: cover; }
 .feed .offline { position: absolute; inset: 0; display: grid; place-items: center; color: oklch(80% 0.02 70); font-size: 19px; text-align: center; line-height: 1.6; }
 .feed .offline small { color: oklch(68% 0.02 70); font-size: 14px; }
 .feed.driving { border-color: var(--go); }
-.badge { position: absolute; top: 18px; left: 18px; padding: 10px 18px 10px 14px; border-radius: 999px; font-weight: 800; font-size: 17px; letter-spacing: .01em; display: flex; align-items: center; gap: 9px; background: var(--linen); color: var(--ink); box-shadow: var(--shadow); }
-.badge::before { content: ''; width: 12px; height: 12px; border-radius: 50%; background: var(--ink-3); }
-.badge.ready { background: var(--lamp); color: var(--lamp-ink); } .badge.ready::before { background: var(--lamp-ink); }
-.badge.moving { background: var(--go); color: white; } .badge.moving::before { background: white; }
-.badge.offline { background: var(--stop-soft); color: var(--stop); } .badge.offline::before { background: var(--stop); }
-.side { display: flex; flex-direction: column; gap: 18px; min-height: 0; }
+.badge { position: absolute; top: 18px; left: 18px; padding: 10px 18px; font-weight: 800; font-size: 17px; letter-spacing: .01em; display: flex; align-items: center; gap: 9px; background: var(--linen); color: var(--ink); box-shadow: var(--shadow); }
+.badge.ready { background: var(--lamp); color: var(--lamp-ink); }
+.badge.moving { background: var(--go); color: white; }
+.badge.offline { background: var(--stop-soft); color: var(--stop); }
 .dpad { aspect-ratio: 1; display: grid; grid-template: repeat(3, 1fr) / repeat(3, 1fr); gap: 10px; }
 .dpad > div { border-radius: 20px; display: grid; place-items: center; font-size: 34px; color: var(--ink-3); }
 .dpad [data-d] { background: var(--linen); border: 2px solid var(--line); box-shadow: var(--shadow); transition: all .2s var(--ease); }

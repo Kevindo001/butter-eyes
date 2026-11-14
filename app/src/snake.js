@@ -41,7 +41,7 @@ export class Snake {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = 'oklch(58% 0.17 35)';
     ctx.beginPath(); ctx.arc((this.food[0] + 0.5) * cw, (this.food[1] + 0.5) * ch, cw * 0.32, 0, 7); ctx.fill();
-    this.body.forEach(([x, y], i) => { ctx.fillStyle = i ? 'oklch(64% 0.14 72)' : 'oklch(28% 0.02 55)'; ctx.beginPath(); ctx.roundRect(x * cw + 2, y * ch + 2, cw - 4, ch - 4, 8); ctx.fill(); });
+    this.body.forEach(([x, y], i) => { ctx.fillStyle = i ? 'oklch(64% 0.14 72)' : 'oklch(28% 0.02 55)'; ctx.beginPath(); ctx.rect(x * cw + 2, y * ch + 2, cw - 4, ch - 4); ctx.fill(); });
     if (this.dead || this.paused) {
       ctx.fillStyle = 'oklch(97% 0.012 85 / 0.88)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = 'oklch(25% 0.02 55)'; ctx.font = '800 34px Atkinson, sans-serif'; ctx.textAlign = 'center';

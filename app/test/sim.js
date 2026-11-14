@@ -26,6 +26,7 @@ export function makeSim({ seed = 7, persona = 'typical', fps = 30, dropRate = 0.
   const dt = 1000 / fps;
   let t = 0;
   const lid = { L: 0, R: 0 };
+  let brow = 0, nextBrowBlip = 15000 + 10000 * r.u(), browBlipEnd = -1;
   // natural blinks: log-normal spacing (median ~3.2 s) -> occasional quick pairs, like real people
   const nextGap = () => Math.max(180, Math.exp(Math.log(3200) + 0.75 * r.n()));
   let nextBlink = nextGap();
@@ -49,6 +50,10 @@ export function makeSim({ seed = 7, persona = 'typical', fps = 30, dropRate = 0.
       goal = Math.max(goal, other * P.otherDrop);
       lid[e] += (goal - lid[e]) * (1 - Math.exp(-dt / P.lidTau));
     }
+    // eyebrows: follow the target; when relaxed, an occasional short natural raise (surprise, emphasis)
+    if (naturalOn && t >= nextBrowBlip) { browBlipEnd = t + 350 + 300 * r.u(); nextBrowBlip = t + 15000 + 15000 * r.u(); }
+    const browGoal = Math.max(target.brow || 0, t < browBlipEnd ? 0.8 : 0);
+    brow += (browGoal - brow) * (1 - Math.exp(-dt / 60));
     if (target.face === false || r.u() < dropRate) return { t, f: { face: false } };
     const raw = { b: {}, r: {} };
     for (const e of ['L', 'R']) {
@@ -58,6 +63,7 @@ export function makeSim({ seed = 7, persona = 'typical', fps = 30, dropRate = 0.
       if (P.glare && r.u() < P.glare) rv += (r.u() - 0.5) * 0.2; // glare on the lens corrupts lid shape
       raw.r[e] = Math.max(0, rv);
     }
+    raw.brow = Math.max(0, 0.06 + 0.55 * brow * P.strength + 0.025 * r.n());
     return { t, f: { face: true, raw } };
   }
 
@@ -71,11 +77,12 @@ export function makeSim({ seed = 7, persona = 'typical', fps = 30, dropRate = 0.
 
 // gesture scripts (target lid closure over time), with a human reaction delay
 export const G = {
-  DOUBLE_BLINK: [[160, { lidL: 1, lidR: 1 }], [190, {}], [160, { lidL: 1, lidR: 1 }]],
+  DOUBLE_BLINK: [[330, { lidL: 1, lidR: 1 }], [260, {}], [330, { lidL: 1, lidR: 1 }]], // slow and deliberate
   WINK_LEFT: [[420, { lidL: 1 }]],
   WINK_RIGHT: [[420, { lidR: 1 }]],
   HOLD_LEFT: [[1800, { lidL: 1 }]],
   HOLD_RIGHT: [[1800, { lidR: 1 }]],
+  BROW_HOLD: [[2300, { brow: 1 }]],
   BOTH_CLOSED: [[2600, { lidL: 1, lidR: 1 }]],
 };
 export const doGesture = (sim, g, settle = 700) => [...sim.run([[300 + 200 * Math.random(), {}]]), ...sim.run(G[g]), ...sim.run([[settle, {}]])];
@@ -89,11 +96,11 @@ export function simCalibrationSamples(sim, { reps = 5, skip = [] } = {}) {
   sim.run([[800, {}]]);
   const out = { relaxed, closed, reps: {} };
   sim.setNatural(true);
-  for (const g of ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT']) {
+  for (const g of ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT', 'BROW_HOLD']) {
     out.reps[g] = [];
     if (skip.includes(g)) continue;
     for (let i = 0; i < reps; i++) {
-      const windowMs = g.startsWith('HOLD') ? 2800 : 2400;
+      const windowMs = g === 'BROW_HOLD' ? 3400 : g === 'DOUBLE_BLINK' ? 3000 : g.startsWith('HOLD') ? 2800 : 2400;
       const t0 = sim.now();
       const frames = [...sim.run([[350 + 150 * (i % 3), {}]]), ...sim.run(G[g])];
       frames.push(...sim.run([[Math.max(100, windowMs - (sim.now() - t0)), {}]]));

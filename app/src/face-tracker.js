@@ -95,7 +95,7 @@ export class FaceTracker {
     }
     return {
       face: true,
-      raw: { b: { L: bs.eyeBlinkLeft, R: bs.eyeBlinkRight }, r },
+      raw: { b: { L: bs.eyeBlinkLeft, R: bs.eyeBlinkRight }, r, brow: (bs.browInnerUp + bs.browOuterUpLeft + bs.browOuterUpRight) / 3 },
       eyePx: eyeWidthPx(P, vw),
       glare: this.glare,
       multiple: lk.multiple,

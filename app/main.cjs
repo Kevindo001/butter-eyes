@@ -23,6 +23,7 @@ const DEFAULT_SETTINGS = {
   butterUrl: process.env.BUTTER_URL || 'ws://100.127.78.50:8770',
   butterCameraUrl: process.env.BUTTER_CAMERA_URL || 'http://100.127.78.50:5600/',
   voiceOut: 'laptop',       // laptop | butter | both
+  driveSpeed: 0.35,         // motor power 0.1-1.0
   voiceId: '',
   persona: '',
   cameraId: '',
@@ -63,6 +64,7 @@ async function initServices() {
     url: store.settings.butterUrl,
     onStatus: (s) => win?.webContents.send('butter:status', s),
   });
+  butter.setSpeed(store.settings.driveSpeed);
   log('services: llm', !!process.env.DEEPSEEK_API_KEY, 'speech', speech.enabled, 'butter', store.settings.butterUrl);
 }
 
@@ -117,6 +119,7 @@ ipcMain.handle('store:settings', (_e, patch) => {
   store.settings = { ...store.settings, ...patch };
   saveStore();
   if (store.settings.butterUrl !== before) butter.setUrl(store.settings.butterUrl);
+  if ('driveSpeed' in patch) butter.setSpeed(store.settings.driveSpeed);
   return store.settings;
 });
 ipcMain.handle('store:calibration', (_e, cal) => { store.calibration = cal; saveStore(); return true; });

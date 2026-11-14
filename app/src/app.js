@@ -22,6 +22,7 @@ const S = {
   butter: { connected: false },
   log: [], lastFrame: null, frames: 0, faceFrames: 0,
   status: { multiple: false, lock: 'searching', close: false, glare: false, drift: false },
+  control: true, // eye control on/off (eyebrow hold toggles it); off = blink freely, nothing fires
 };
 let mic = null;
 window.__butter = { S, mic: () => mic, screens: null, inject: (type, extra = {}) => dispatch({ type, t: performance.now(), src: 'test', ...extra }) };
@@ -34,11 +35,14 @@ function toast(msg, ms = 2400) {
 const flash = document.createElement('div'); flash.className = 'flash'; document.body.append(flash);
 function pulse() { flash.classList.remove('go'); void flash.offsetWidth; flash.classList.add('go'); }
 
-const LABEL = { DOUBLE_BLINK: 'Double blink', WINK_LEFT: 'Wink left', WINK_RIGHT: 'Wink right', HOLD_LEFT: 'Hold left', HOLD_RIGHT: 'Hold right', BOTH_CLOSED: 'Eyes closed' };
+const LABEL = { BROW_HOLD: 'Eyebrows', DOUBLE_BLINK: 'Double blink', WINK_LEFT: 'Wink left', WINK_RIGHT: 'Wink right', HOLD_LEFT: 'Hold left', HOLD_RIGHT: 'Hold right', BOTH_CLOSED: 'Eyes closed' };
 
 // ============================================================ input bus
 function dispatch(ev) {
   if (S.calibrating && ev.src !== 'test') return;
+  if (ev.type === 'BROW_HOLD') { setControl(!S.control); pulse(); return; }
+  // eye control off: nothing fires except the safety stop and status events
+  if (!S.control && ev.src !== 'key' && !['BOTH_CLOSED', 'LONG_BLINK', 'FACE_LOST', 'FACE_FOUND', 'CALIBRATION_DRIFT'].includes(ev.type)) return;
   S.log.push({ type: ev.type, t: Math.round(ev.t), screen: S.screenName });
   if (S.log.length > 300) S.log.shift();
   if (LABEL[ev.type]) { pulse(); const g = $('#lastGesture'); if (g) { g.textContent = LABEL[ev.type]; g.classList.remove('show'); void g.offsetWidth; g.classList.add('show'); } }
@@ -47,8 +51,16 @@ function dispatch(ev) {
   if (ev.type === 'BOTH_CLOSED' && !['home', 'calibrate'].includes(S.screenName)) go('home');
 }
 
+function setControl(on) {
+  S.control = on;
+  if (!on && S.screenName === 'drive') screens.drive.stop();
+  paintPills();
+  if (S.screenName === 'drive') screens.drive.paint();
+  toast(on ? 'Eye control on' : 'Eye control off: blink freely. Raise your eyebrows 2 s to turn it back on.', 3200);
+}
+
 // keyboard = caregiver / demo backup, same gestures
-const KEYMAP = { q: 'WINK_LEFT', ArrowLeft: 'WINK_LEFT', e: 'WINK_RIGHT', ArrowRight: 'WINK_RIGHT', ' ': 'DOUBLE_BLINK', Escape: 'BOTH_CLOSED' };
+const KEYMAP = { s: 'LONG_BLINK', q: 'WINK_LEFT', ArrowLeft: 'WINK_LEFT', e: 'WINK_RIGHT', ArrowRight: 'WINK_RIGHT', ' ': 'DOUBLE_BLINK', Escape: 'BOTH_CLOSED' };
 const HOLDKEYS = { a: 'left', d: 'right' };
 addEventListener('keydown', (e) => {
   if (e.target.matches('input, textarea') || e.repeat) return;
@@ -56,6 +68,7 @@ addEventListener('keydown', (e) => {
   if (KEYMAP[e.key]) { e.preventDefault(); dispatch({ type: KEYMAP[e.key], t, src: 'key' }); return; }
   if (HOLDKEYS[e.key]) { dispatch({ type: 'HOLD_' + HOLDKEYS[e.key].toUpperCase(), side: HOLDKEYS[e.key], t, src: 'key' }); return; }
   if (e.key === 'c') go('calibrate');
+  if (e.key === 'b') dispatch({ type: 'BROW_HOLD', t, src: 'key' });
 });
 addEventListener('keyup', (e) => {
   if (HOLDKEYS[e.key] && !e.target.matches('input, textarea')) dispatch({ type: 'HOLD_END', side: HOLDKEYS[e.key], t: performance.now(), src: 'key' });
@@ -119,27 +132,34 @@ screens.drive = {
   stop(msg) { clearTimeout(this.timer); this.cruise = false; this.confirmUntil = 0; this.set('stop'); this.paint(); if (msg) toast(msg); },
   render() {
     const cam = S.settings.butterCameraUrl;
-    main.innerHTML = `<section class="screen">
-      <div><h1>Drive Butter</h1></div>
-      <div class="drive">
-        <div class="feed" id="feed">
-          <img id="feedImg" src="${esc(cam)}" alt="" />
-          <div class="offline" id="feedOff" hidden>Butter's camera is not reachable<br><small>${esc(cam)}</small></div>
-          <div class="badge" id="badge"></div>
+    const canBrow = enabled().BROW_HOLD !== false && !!S.engine?.cal?.brow;
+    main.innerHTML = `<section class="screen drivescreen">
+      <aside class="sidebar">
+        <div class="sidecard" id="ctlCard">
+          <small>Eye control</small><b id="ctlState"></b>
+          <span>${canBrow ? 'Raise eyebrows 2 s to switch' : 'Press B to switch'}</span>
         </div>
-        <div class="side">
-          <div class="dpad" id="dpad">
-            <div></div><div data-d="forward">${ICONS.up}</div><div></div>
-            <div data-d="left">${ICONS.left}</div><div class="mid" id="mid"></div><div data-d="right">${ICONS.right}</div>
-            <div></div><div data-d="backward">${ICONS.down}</div><div></div>
-          </div>
-          <div class="legend">
-            <b>Double blink</b> twice to go, once to stop<br>
-            <b>Wink left / right</b> small turn<br>
-            <b>Hold an eye closed</b> keep turning<br>
-            <b>Close both eyes 2 s</b> stop, then exit
-          </div>
+        <div class="sidecard dim">
+          <small>Mode</small><b>Blink drive</b>
+          <span>Joystick mode: coming next</span>
         </div>
+        <div class="dpad" id="dpad">
+          <div></div><div data-d="forward">${ICONS.up}</div><div></div>
+          <div data-d="left">${ICONS.left}</div><div class="mid" id="mid"></div><div data-d="right">${ICONS.right}</div>
+          <div></div><div data-d="backward">${ICONS.down}</div><div></div>
+        </div>
+        <div class="legend">
+          <b>Slow double blink</b> twice: go<br>
+          <b>Double blink</b> or <b>long blink</b>: stop<br>
+          <b>Close left eye</b>: turn right<br>
+          <b>Close right eye</b>: turn left<br>
+          <b>Both eyes 2 s</b>: stop, exit
+        </div>
+      </aside>
+      <div class="feed" id="feed">
+        <img id="feedImg" src="${esc(cam)}" alt="" />
+        <div class="offline" id="feedOff" hidden>Butter's camera is not reachable<br><small>${esc(cam)}</small></div>
+        <div class="badge" id="badge"></div>
       </div>
     </section>`;
     const img = $('#feedImg');
@@ -152,14 +172,20 @@ screens.drive = {
     const moving = this.dir !== 'stop';
     const confirming = performance.now() < this.confirmUntil;
     b.className = 'badge ' + (!S.butter.connected ? 'offline' : moving ? 'moving' : confirming ? 'ready' : 'parked');
-    b.textContent = !S.butter.connected ? 'Butter offline' : moving ? names[this.dir] : confirming ? 'Double blink again to go' : 'Parked';
+    b.textContent = !S.butter.connected ? 'Butter offline' : !S.control ? 'Eye control off' : moving ? names[this.dir] : confirming ? 'Double blink again to go' : 'Parked';
     $('#feed').classList.toggle('driving', moving);
     main.querySelectorAll('#dpad [data-d]').forEach((el) => el.classList.toggle('on', el.dataset.d === this.dir));
     $('#mid').textContent = this.cruise ? 'cruise' : '';
+    const cs = $('#ctlState'); if (cs) { cs.textContent = S.control ? 'On' : 'Off'; $('#ctlCard').classList.toggle('off', !S.control); }
   },
   on(ev) {
     if (ev.type === 'FACE_LOST') { this.stop('Face lost: stopped'); return true; }
+    if (ev.type === 'LONG_BLINK') { // quick stop: stopping must be faster than starting
+      if (this.dir !== 'stop' || this.cruise) { this.stop('Stopped'); this.quickStopAt = performance.now(); }
+      return true;
+    }
     if (ev.type === 'BOTH_CLOSED') {
+      if (performance.now() - (this.quickStopAt || 0) < 2600) { this.quickStopAt = 0; return true; } // same eye-close that already stopped it
       if (this.dir !== 'stop' || this.cruise || performance.now() < this.confirmUntil) this.stop('Stopped');
       else go('home');
       return true;
@@ -203,7 +229,8 @@ screens.talk = {
     });
     try { await mic.start(); } catch (e) { this.info = 'Microphone blocked: ' + e.message; mic = null; this.paintBar(); }
   },
-  heard(text) { this.convo.push({ who: 'them', text, t: Date.now() }); this.quick = false; this.render(); this.refresh(); },
+  // new speech refreshes the replies but never closes the quick-phrase board the user just opened
+  heard(text) { this.convo.push({ who: 'them', text, t: Date.now() }); this.render(); this.refresh(); },
   async refresh() {
     const id = ++this.reqId;
     this.loading = true; this.paintOptions();
@@ -309,6 +336,7 @@ screens.settings = {
   rows() {
     const s = S.settings;
     return [
+      { k: 'driveSpeed', label: 'Drive speed', vals: [{ v: 0.25, l: 'Slow' }, { v: 0.35, l: 'Medium' }, { v: 0.5, l: 'Fast' }] },
       { k: 'voiceOut', label: 'Voice comes out of', vals: [{ v: 'laptop', l: 'Laptop' }, { v: 'butter', l: 'Butter' }, { v: 'both', l: 'Both' }] },
       { k: 'recal', label: 'Recalibrate eyes', action: () => go('calibrate') },
       { k: 'back', label: 'Back to home', action: () => go('home') },
@@ -478,6 +506,7 @@ screens.calibrate = {
 // did the person attempt this gesture at all? (used only to skip ones they can't do)
 function looksLikeTried(g, rep, tf) {
   const s = rep.filter((f) => f.face).map((f) => { const c = closure(f.raw, tf); return { t: f.t, cL: c.L, cR: c.R }; });
+  if (g === 'BROW_HOLD') { const b = rep.filter((f) => f.face).map((f) => f.raw.brow); return b.length > 5 && Math.max(...b) - Math.min(...b) > 0.12; }
   if (g === 'DOUBLE_BLINK') return closureIntervals(s, (x) => Math.min(x.cL, x.cR), 0.5, 0.3).length >= 2;
   return s.some((x) => Math.abs(x.cL - x.cR) > 0.35);
 }
@@ -503,10 +532,11 @@ function paintPills() {
   set('pillClose', st.close);
   set('pillGlare', st.glare);
   set('pillDrift', st.drift);
+  set('pillControl', !S.control);
 }
 
 function paintHud(frame) {
-  $('#pillFace').classList.toggle('on', !!frame.face);
+  if (paintHud.face !== !!frame.face) { paintHud.face = !!frame.face; $('#pillFace').classList.toggle('on', paintHud.face); $('#pillFace b').textContent = paintHud.face ? 'Face found' : 'No face'; }
   const st = S.status;
   const ch = st.multiple !== frame.multiple || st.lock !== frame.lock || st.close !== (frame.face && frame.eyePx < 22) || st.glare !== (frame.face && frame.glare > 0.06);
   st.multiple = !!frame.multiple; st.lock = frame.lock;
@@ -521,7 +551,7 @@ function paintHud(frame) {
     el.style.setProperty('--hold', holding ? (e.hold.frac * 360).toFixed(0) + 'deg' : '0deg');
     el.classList.toggle('lost', !frame.face);
   }
-  const both = $('#bothRing'); if (both) both.style.setProperty('--both', ((e?.both || 0) * 360).toFixed(0) + 'deg');
+  const both = $('#bothRing'); if (both) both.style.setProperty('--both', (Math.max(e?.both || 0, e?.brow || 0) * 360).toFixed(0) + 'deg');
 }
 
 async function initTracking() {
@@ -551,10 +581,11 @@ async function initTracking() {
   S.settings = S.store.settings;
   $('#pillAi').classList.toggle('on', S.store.keys.deepseek && S.store.keys.elevenlabs);
   $('#pillAi').classList.toggle('warn', S.store.keys.deepseek !== S.store.keys.elevenlabs);
+  $('#pillAi b').textContent = S.store.keys.deepseek && S.store.keys.elevenlabs ? 'Voice + AI ready' : 'Voice + AI: key missing';
   api.onButterStatus((s) => {
     S.butter = s;
     $('#pillButter').classList.toggle('on', s.connected);
-    $('#pillButter b').textContent = s.connected ? (s.mock ? 'Butter (mock)' : 'Butter') : 'Butter offline';
+    $('#pillButter b').textContent = s.connected ? (s.mock ? 'Butter connected (mock)' : 'Butter connected') : 'Butter offline';
     if (S.screenName === 'drive') screens.drive.paint();
   });
   S.butter = await api.butterStatus();

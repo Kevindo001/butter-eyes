@@ -7,7 +7,7 @@ import WebSocket from 'ws';
 export const DIRECTIONS = ['forward', 'backward', 'left', 'right', 'strafe_left', 'strafe_right', 'stop'];
 
 export function createButterClient({ url, onStatus = () => {}, heartbeatMs = 150, ttlMs = 450, WS = WebSocket } = {}) {
-  let ws = null, dir = 'stop', hb = null, retry = null, closed = false;
+  let ws = null, dir = 'stop', hb = null, retry = null, closed = false, speed = null;
   let status = { connected: false, url, dir: 'stop', lastAck: null, error: null, mock: null };
   const set = (p) => { status = { ...status, ...p }; onStatus(status); };
 
@@ -19,7 +19,7 @@ export function createButterClient({ url, onStatus = () => {}, heartbeatMs = 150
   function connect() {
     if (closed || !url) return;
     try { ws = new WS(url, { handshakeTimeout: 2500 }); } catch (e) { set({ error: e.message }); return schedule(); }
-    ws.on('open', () => { set({ connected: true, error: null }); send({ cmd: 'hello', client: 'butter-eyes' }); });
+    ws.on('open', () => { set({ connected: true, error: null }); send({ cmd: 'hello', client: 'butter-eyes' }); if (speed) send({ cmd: 'speed', value: speed }); });
     ws.on('message', (raw) => {
       let m; try { m = JSON.parse(raw); } catch { return; }
       if (m.type === 'hello') set({ mock: !!m.mock, robot: m.robot });
@@ -52,6 +52,7 @@ export function createButterClient({ url, onStatus = () => {}, heartbeatMs = 150
     pulse(d, ms) { drive(d); pulseTimer = setTimeout(() => drive('stop'), Math.min(ms, 3000)); },
     say: (text, mp3Base64) => send({ cmd: 'say', text, mp3: mp3Base64 || undefined }),
     status: () => status,
+    setSpeed(v) { speed = v; send({ cmd: 'speed', value: v }); },
     setUrl(u) { url = u; set({ url }); try { ws?.close(); } catch {} },
     close() { closed = true; stopHeartbeat(); send({ cmd: 'drive', dir: 'stop' }); clearTimeout(retry); try { ws?.close(); } catch {} },
   };

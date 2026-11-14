@@ -144,18 +144,43 @@ try {
     await inject('BOTH_CLOSED'); // clear the fresh prompt
   });
 
-  await check('drive: wink = short timed turn, hold = turn while held, face lost = stop', async () => {
+  await check('drive: you turn toward your open eye; wink = short timed turn, hold = turn while held, face lost = stop', async () => {
     motorLog = [];
     await inject('WINK_LEFT'); await sleep(900);
     await inject('HOLD_RIGHT', { side: 'right' }); await sleep(800); await inject('HOLD_END', { side: 'right' }); await sleep(200);
     await inject('DOUBLE_BLINK'); await inject('DOUBLE_BLINK'); await sleep(400);
     await inject('FACE_LOST'); await sleep(250);
     const turn = motorLog.filter((x) => x.dir);
-    assert(motors().join() === 'left,stop,right,stop,forward,stop', 'sequence ' + motors());
+    assert(motors().join() === 'right,stop,left,stop,forward,stop', 'sequence ' + motors() + ' (closing the left eye must turn right)');
     const pulse = turn[1].t - turn[0].t, hold = turn[3].t - turn[2].t;
     assert(pulse > 400 && pulse < 800, 'wink turn ' + pulse);
     assert(hold > 650 && hold < 1100, 'hold turn ' + hold);
     return `wink turn ${pulse} ms, hold turn ${hold} ms`;
+  });
+
+  await check('drive: long blink is a quick stop, and the same eye-close reaching 2 s does not also exit', async () => {
+    motorLog = [];
+    await inject('DOUBLE_BLINK'); await inject('DOUBLE_BLINK'); await sleep(400);
+    await inject('LONG_BLINK'); await sleep(200);
+    assert(motors().join() === 'forward,stop', 'sequence ' + motors());
+    await inject('BOTH_CLOSED');
+    assert(await screen() === 'drive', 'exited drive on the same eye close');
+  });
+
+  await check('eye control off (eyebrow hold): gestures ignored and Butter stops; safety stop still works; on again restores', async () => {
+    motorLog = [];
+    await inject('DOUBLE_BLINK'); await inject('DOUBLE_BLINK'); await sleep(300);
+    await inject('BROW_HOLD'); await sleep(250);
+    assert(motors().join() === 'forward,stop', 'turning control off must stop: ' + motors());
+    assert(await page.locator('#pillControl').isVisible(), 'no "Eye control off" badge');
+    assert((await page.locator('#ctlState').textContent()) === 'Off', 'sidebar not Off');
+    await shot('03b-control-off');
+    await inject('DOUBLE_BLINK'); await inject('DOUBLE_BLINK'); await inject('WINK_LEFT'); await sleep(400);
+    assert(motors().join() === 'forward,stop', 'moved while eye control was off: ' + motors());
+    await inject('BROW_HOLD');
+    assert(await page.locator('#pillControl').isHidden(), 'badge still shown');
+    await inject('WINK_LEFT'); await sleep(900);
+    assert(motors().join() === 'forward,stop,right,stop', 'control did not come back: ' + motors());
   });
 
   await check('drive: robot dies mid-drive -> offline badge; restarts -> reconnects stopped, no resume', async () => {
@@ -179,12 +204,12 @@ try {
     await page.evaluate(() => { window.__butter.screens.home.i = 2; window.__butter.screens.home.render(); });
     await inject('DOUBLE_BLINK');
     assert(await screen() === 'settings', 'settings not open');
-    await inject('DOUBLE_BLINK'); // row 0: voice output laptop -> butter
-    await until(() => S("S.settings.voiceOut === 'butter'"), 3000, 'setting change');
-    assert(JSON.parse(fs.readFileSync(storePath, 'utf8')).settings.voiceOut === 'butter', 'not persisted');
+    await inject('DOUBLE_BLINK'); // row 0: drive speed medium -> fast
+    await until(() => S('S.settings.driveSpeed === 0.5'), 3000, 'setting change');
+    assert(JSON.parse(fs.readFileSync(storePath, 'utf8')).settings.driveSpeed === 0.5, 'not persisted');
     assert((await page.content()).includes('Gestures you can use'), 'no gestures card');
     await shot('07-settings');
-    await page.evaluate(() => window.butterApi.saveSettings({ voiceOut: 'laptop' }).then((s) => { window.__butter.S.settings = s; }));
+    await page.evaluate(() => window.butterApi.saveSettings({ driveSpeed: 0.35 }).then((s) => { window.__butter.S.settings = s; }));
     await inject('BOTH_CLOSED');
   });
 

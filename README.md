@@ -48,15 +48,16 @@ Normal blinking and where you look are never inputs. Only these are:
 
 | Gesture | What counts |
 |---|---|
-| Double blink | two quick, deliberate blinks |
+| Double blink | two slow, deliberate blinks, each longer than your natural blinks (natural blink pairs are ignored) |
 | Wink left / right | one eye closed briefly while the other stays open |
 | Hold left / right | one eye kept closed past your hold time (a ring fills on the eye display); fires while held |
+| Raise eyebrows ~2 s | turns eye control off / on, so you can blink freely when you're not giving commands |
 | Close both eyes 2 s | always stop / back, on every screen |
 
 What each gesture does per screen is provisional and lives in one table: `app/src/mapping.js`.
-Right now: Home: wink to move, double blink to open. Talk: wink to pick between 3 replies (most likely in the middle), double blink to say it, hold left for quick phrases, hold right for new replies. Drive: double blink twice to go (confirm step), once to stop, wink for a short turn, hold to keep turning.
+Right now: Home: wink to move, double blink to open. Talk: wink to pick between 3 replies (most likely in the middle), double blink to say it, hold left for quick phrases, hold right for new replies. Drive: double blink twice to go (confirm step); double blink or a long blink (0.5 s) to stop; you turn toward your open eye (close the left eye to turn right), wink for a short turn, hold to keep turning. The Drive screen has a sidebar (eye control on/off, mode) and Butter's camera on the right. Drive speed is in Settings.
 
-Keyboard backup (caregiver / demo): Q / E or arrow keys = wink left/right, Space = double blink, hold A / D = hold left/right, Esc = close both eyes, C = recalibrate.
+Keyboard backup (caregiver / demo): Q / E or arrow keys = wink left/right, Space = double blink, hold A / D = hold left/right, S = long blink, B = eye control on/off, Esc = close both eyes, C = recalibrate.
 
 ## Calibration (about 2 minutes, per person)
 

@@ -19,11 +19,12 @@ export const CLOSED_MS = 3000;
 export const CLOSED_CHIME_MS = 2600;
 export const REPS = 5;
 export const ENROLL = [
-  { g: 'DOUBLE_BLINK', label: 'Double blink', cue: 'Blink twice, quickly', windowMs: 2400 },
+  { g: 'DOUBLE_BLINK', label: 'Double blink', cue: 'Blink twice, slowly and firmly: close... open... close... open', windowMs: 3000 },
   { g: 'WINK_LEFT', label: 'Wink left', cue: 'Quick wink with your LEFT eye', windowMs: 2400 },
   { g: 'WINK_RIGHT', label: 'Wink right', cue: 'Quick wink with your RIGHT eye', windowMs: 2400 },
   { g: 'HOLD_LEFT', label: 'Hold left', cue: 'Close your LEFT eye and keep it closed until the chime', windowMs: 2800, chimeMs: 1700 },
   { g: 'HOLD_RIGHT', label: 'Hold right', cue: 'Close your RIGHT eye and keep it closed until the chime', windowMs: 2800, chimeMs: 1700 },
+  { g: 'BROW_HOLD', label: 'Raise eyebrows', cue: 'Raise your eyebrows and hold them up until the chime', windowMs: 3400, chimeMs: 2400 },
 ];
 export const READING_TEXT = 'Butter is a small robot that you can drive with your eyes. Take your time and read this the way you normally would. Look around the screen, blink whenever you like, and relax. There is nothing to do right now; we are just learning what your eyes look like when you are not giving a command.';
 
@@ -131,28 +132,42 @@ export function fitCalibration(samples) {
     P.winkMinMs = clamp(0.45 * Math.min(...winkDurs), 150, 280);
     P.holdMs = clamp(Math.max(...winkDurs) * 1.3, 650, 1300);
   }
-  // double blink timing
+  // double blink = two SLOW, deliberate blinks. Each must last clearly longer than this person's
+  // natural blinks, so natural blink pairs (which everyone has) can't be mistaken for it.
+  const bothLow = Math.min(P.closeT.L, P.closeT.R), bothOff = Math.max(P.openT.L, P.openT.R);
+  const nat = closureIntervals(sRelaxed.map(sw), (s) => Math.min(s.cL, s.cR), bothLow, bothOff);
+  const natP95 = nat.length ? quantile(nat.map((x) => x.dur), 0.95) : 180;
   const dblCloses = [], dblGaps = [];
   for (const r of repSeries.DOUBLE_BLINK) {
-    const iv = closureIntervals(r, (s) => Math.min(s.cL, s.cR), Math.min(P.closeT.L, P.closeT.R), Math.max(P.openT.L, P.openT.R));
+    const iv = closureIntervals(r, (s) => Math.min(s.cL, s.cR), bothLow, bothOff);
     for (let i = 0; i + 1 < iv.length; i++) {
       const gap = iv[i + 1].start - iv[i].end;
       if (gap < 900) { dblCloses.push(iv[i].dur, iv[i + 1].dur); dblGaps.push(gap); break; }
     }
   }
+  P.dbl.closeMinMs = clamp(natP95 + 50, 200, 330);
   if (dblGaps.length >= 3) {
-    P.dbl.closeMaxMs = clamp(Math.max(...dblCloses) * 1.35, 250, 500);
-    P.dbl.gapMaxMs = clamp(Math.max(...dblGaps) * 1.35, 250, 600);
+    const minClose = Math.min(...dblCloses);
+    if (minClose * 0.85 < P.dbl.closeMinMs) {
+      report.notes.push('Your double blinks were about as quick as your normal blinks. Make each of the two blinks slower and firmer, then recalibrate, or double blink may be unreliable.');
+    }
+    P.dbl.closeMaxMs = clamp(Math.max(...dblCloses) * 1.5, P.dbl.closeMinMs + 200, 700);
+    P.dbl.gapMaxMs = clamp(Math.max(...dblGaps) * 1.35, 300, 700);
   }
-  // how often do this person's natural blinks come in pairs that look like a double blink?
-  const nat = closureIntervals(sRelaxed.map(sw), (s) => Math.min(s.cL, s.cR), Math.min(P.closeT.L, P.closeT.R), Math.max(P.openT.L, P.openT.R));
-  let natPairs = 0;
-  for (let i = 0; i + 1 < nat.length; i++) if (nat[i + 1].start - nat[i].end <= P.dbl.gapMaxMs && nat[i].dur <= P.dbl.closeMaxMs && nat[i + 1].dur <= P.dbl.closeMaxMs) natPairs++;
   report.naturalBlinksPerMin = Number(((nat.length * 60000) / RELAXED_MS).toFixed(1));
-  if (natPairs > 0) report.warnings.push(`Your natural blinks came in quick pairs ${natPairs} time(s) in 30 s, so double blink may sometimes fire by accident. Use it for actions that are easy to undo.`);
+
+  // eyebrows: rest level from relaxed reading, raised level from the reps
+  let brow = null;
+  const restB = relaxed.map((f) => f.raw.brow).filter((v) => typeof v === 'number');
+  const repB = (samples.reps?.BROW_HOLD || []).map((rep) => quantile(rep.filter((f) => f.face && typeof f.raw.brow === 'number').map((f) => f.raw.brow), 0.7)).filter((v) => !Number.isNaN(v));
+  if (restB.length > 100 && repB.length >= 3) {
+    const rest = median(restB), raised = median(repB);
+    if (raised - rest > 0.15) brow = { rest, raised };
+    else report.notes.push('Raising your eyebrows barely showed up on camera, so that gesture is off.');
+  }
 
   // ---- 5. replay the calibration through the fitted engine: the report card
-  const cal = { version: 3, createdAt: Date.now(), tf, swapB, swapSides, params: P };
+  const cal = { version: 3, createdAt: Date.now(), tf, swapB, swapSides, brow, params: P };
   const replay = (rows, enabled) => {
     const eng = new GestureEngine({ ...cal, params: { ...P, enabled } });
     const out = [];

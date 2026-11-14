@@ -5,7 +5,7 @@ import { fitCalibration } from '../src/calibration.js';
 import { FaceLock } from '../src/face-lock.js';
 import { makeSim, simCalibrationSamples, PERSONAS, G } from './sim.js';
 
-const IGNORE = new Set(['FACE_FOUND', 'FACE_LOST', 'HOLD_END', 'CALIBRATION_DRIFT']);
+const IGNORE = new Set(['FACE_FOUND', 'FACE_LOST', 'HOLD_END', 'CALIBRATION_DRIFT', 'LONG_BLINK']);
 const types = (ev) => ev.map((e) => e.type).filter((x) => !IGNORE.has(x));
 
 function setup(persona, seed = 3) {
@@ -19,14 +19,14 @@ function setup(persona, seed = 3) {
 }
 
 const EXPECT_RELIABLE = {
-  typical: ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT'],
-  glasses: ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT'],
-  smallEyes: ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT'],
-  glassesSmall: ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT'],
-  weak: ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT'],
-  partialWink: ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT'],
-  asymmetric: ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT'],
-  noWink: ['DOUBLE_BLINK'],
+  typical: ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT', 'BROW_HOLD'],
+  glasses: ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT', 'BROW_HOLD'],
+  smallEyes: ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT', 'BROW_HOLD'],
+  glassesSmall: ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT', 'BROW_HOLD'],
+  weak: ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT', 'BROW_HOLD'],
+  partialWink: ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT', 'BROW_HOLD'],
+  asymmetric: ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT', 'BROW_HOLD'],
+  noWink: ['DOUBLE_BLINK', 'BROW_HOLD'],
 };
 
 for (const persona of Object.keys(PERSONAS)) {
@@ -55,7 +55,7 @@ for (const persona of Object.keys(PERSONAS)) {
         for (const x of ev) if (x !== g) wrong.push(x);
       }
       // winks / double blink: a natural blink sometimes lands inside the gesture (measured ~97-99%, see below)
-      assert.ok(hit >= (g.startsWith('HOLD') || g === 'BOTH_CLOSED' ? 20 : 18), `${g}: caught ${hit}/20`);
+      assert.ok(hit >= (g.includes('HOLD') || g === 'BOTH_CLOSED' ? 20 : 18), `${g}: caught ${hit}/20`);
       assert.deepEqual(wrong, [], `${g} produced ${wrong.join(',')}`);
     }
   });
@@ -200,4 +200,22 @@ test('large sample: 8 people x 2 calibrations x 100 tries per gesture -> >=96% c
     console.log(`  ${g}: ${(100 * hit / n).toFixed(1)}% caught, ${wrong} confused (n=${n})`);
     assert.ok(hit / n >= 0.96, g); assert.equal(wrong, 0, g);
   }
+});
+
+test('LONG_BLINK (quick stop): fires ~0.5 s into a deliberate long blink, never on natural blinking', () => {
+  const { sim, feed } = setup('typical', 21);
+  const relaxed = feed(sim.run([[600_000, {}]])).filter((e) => e.type === 'LONG_BLINK');
+  assert.equal(relaxed.length, 0, 'natural blinks produced LONG_BLINK');
+  sim.setNatural(false);
+  const t0 = sim.now();
+  const ev = feed([...sim.run([[900, { lidL: 1, lidR: 1 }]]), ...sim.run([[600, {}]])]).filter((e) => e.type === 'LONG_BLINK');
+  assert.equal(ev.length, 1);
+  assert.ok(ev[0].t - t0 < 750, 'stop latency ' + (ev[0].t - t0));
+});
+
+test('a quick natural eyebrow raise (under 1 s) does not toggle; a 1.5 s hold does, once', () => {
+  const { sim, feed } = setup('typical', 22);
+  sim.setNatural(false);
+  assert.deepEqual(types(feed([...sim.run([[700, { brow: 1 }]]), ...sim.run([[800, {}]])])), []);
+  assert.deepEqual(types(feed([...sim.run([[3500, { brow: 1 }]]), ...sim.run([[800, {}]])])), ['BROW_HOLD']);
 });
