@@ -51,8 +51,8 @@ Normal blinking and where you look are never inputs. Only these are:
 | Double blink | two slow, deliberate blinks, each longer than your natural blinks (natural blink pairs are ignored) |
 | Wink left / right | one eye closed briefly while the other stays open |
 | Hold left / right | one eye kept closed past your hold time (a ring fills on the eye display); fires while held |
-| Raise eyebrows ~2 s | turns eye control off / on, so you can blink freely when you're not giving commands |
-| Close both eyes 2 s | always stop / back, on every screen |
+| Raise eyebrows 4 s | turns eye control off / on, so you can blink freely when you're not giving commands |
+| Close both eyes 3 s | always stop / back, on every screen |
 
 What each gesture does per screen is provisional and lives in one table: `app/src/mapping.js`.
 Right now: Home: wink to move, double blink to open. Talk: wink to pick between 3 replies (most likely in the middle), double blink to say it, hold left for quick phrases, hold right for new replies. Drive: double blink twice to go (confirm step); double blink or a long blink (0.5 s) to stop; you turn toward your open eye (close the left eye to turn right), wink for a short turn, hold to keep turning. The Drive screen has a sidebar (eye control on/off, mode) and Butter's camera on the right. Drive speed is in Settings.
@@ -77,7 +77,7 @@ One user only: it locks onto the calibrated face, shows a small "Multiple faces 
 
 ## Safety (robot)
 
-Motors stop when: the face is lost, eyes close 2 s, the app or Wi-Fi drops (450 ms heartbeat watchdog on the Jetson, capped at 1 s), the controlling app disconnects, or the server exits. Reconnecting never resumes motion. Wink turns are timed in the main process so a busy UI can't stretch them.
+Motors stop when: the face is lost, eyes close 3 s (quick stop at 0.5 s while driving), the app or Wi-Fi drops (450 ms heartbeat watchdog on the Jetson, capped at 1 s), the controlling app disconnects, or the server exits. Reconnecting never resumes motion. Wink turns are timed in the main process so a busy UI can't stretch them.
 
 ## Test results (Nov 14)
 
@@ -103,6 +103,6 @@ Motors stop when: the face is lost, eyes close 2 s, the app or Wi-Fi drops (450 
 ## Demo script (2 min)
 
 1. Calibrate live (show the relax step and the report card: "these are the gestures this person can use").
-2. Home: double blink Drive. Double blink twice: Butter rolls toward the judges. Wink to steer. Close eyes 2 s: it stops.
+2. Home: double blink Drive. Double blink twice: Butter rolls toward the judges. Wink to steer. Close eyes: it stops.
 3. Close eyes again: Home. Wink to Talk, double blink. A teammate says "Do you want to watch a movie tonight?"; 3 replies appear about a second later; double blink, and it's spoken.
 4. Point out: normal blinking and reading never trigger anything, and a second person walking into frame doesn't take over.

@@ -92,7 +92,7 @@ test('two deliberate winks a second apart count as two', () => {
   assert.deepEqual(ev, ['WINK_LEFT', 'WINK_LEFT']);
 });
 
-test('closing both eyes 2 s fires even right after another gesture (safety stop)', () => {
+test('closing both eyes 3 s fires even right after another gesture (safety stop)', () => {
   const { sim, feed } = setup('typical', 9);
   sim.setNatural(false);
   const ev = types(feed([...sim.run(G.WINK_RIGHT), ...sim.run([[100, {}]]), ...sim.run(G.BOTH_CLOSED), ...sim.run([[500, {}]])]));
@@ -213,11 +213,11 @@ test('LONG_BLINK (quick stop): fires ~0.5 s into a deliberate long blink, never 
   assert.ok(ev[0].t - t0 < 750, 'stop latency ' + (ev[0].t - t0));
 });
 
-test('a quick natural eyebrow raise (under 1 s) does not toggle; a 1.5 s hold does, once', () => {
+test('an expressive eyebrow raise (even 2.5 s) does not toggle; a 4 s hold does, once', () => {
   const { sim, feed } = setup('typical', 22);
   sim.setNatural(false);
-  assert.deepEqual(types(feed([...sim.run([[700, { brow: 1 }]]), ...sim.run([[800, {}]])])), []);
-  assert.deepEqual(types(feed([...sim.run([[3500, { brow: 1 }]]), ...sim.run([[800, {}]])])), ['BROW_HOLD']);
+  assert.deepEqual(types(feed([...sim.run([[2500, { brow: 1 }]]), ...sim.run([[800, {}]])])), []);
+  assert.deepEqual(types(feed([...sim.run([[5000, { brow: 1 }]]), ...sim.run([[800, {}]])])), ['BROW_HOLD']);
 });
 
 // ------------------------------------------------------------------ quick calibration (what the app uses)

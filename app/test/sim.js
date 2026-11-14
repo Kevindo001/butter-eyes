@@ -82,8 +82,8 @@ export const G = {
   WINK_RIGHT: [[420, { lidR: 1 }]],
   HOLD_LEFT: [[1800, { lidL: 1 }]],
   HOLD_RIGHT: [[1800, { lidR: 1 }]],
-  BROW_HOLD: [[2300, { brow: 1 }]],
-  BOTH_CLOSED: [[2600, { lidL: 1, lidR: 1 }]],
+  BROW_HOLD: [[4800, { brow: 1 }]],
+  BOTH_CLOSED: [[3600, { lidL: 1, lidR: 1 }]],
 };
 export const doGesture = (sim, g, settle = 700) => [...sim.run([[300 + 200 * Math.random(), {}]]), ...sim.run(G[g]), ...sim.run([[settle, {}]])];
 
@@ -92,7 +92,7 @@ export function simCalibrationSamples(sim, { reps = 2, skip = [] } = {}) {
   const fr = (a) => a.map((x) => ({ t: x.t, ...x.f }));
   sim.run([[1000, {}]]);
   const relaxed = fr(sim.run([[12000, {}]]));
-  const closed = fr([...sim.run([[350, {}]]), ...sim.run([[2650, { lidL: 1, lidR: 1 }]])]);
+  const closed = fr([...sim.run([[350, {}]]), ...sim.run([[3800, { lidL: 1, lidR: 1 }]])]);
   sim.run([[800, {}]]);
   const out = { relaxed, closed, reps: {} };
   sim.setNatural(true);
@@ -100,7 +100,7 @@ export function simCalibrationSamples(sim, { reps = 2, skip = [] } = {}) {
     out.reps[g] = [];
     if (skip.includes(g)) continue;
     for (let i = 0; i < reps; i++) {
-      const windowMs = g === 'BROW_HOLD' ? 3000 : g === 'DOUBLE_BLINK' || g.startsWith('HOLD') ? 2600 : 2000;
+      const windowMs = g === 'BROW_HOLD' ? 5600 : g === 'DOUBLE_BLINK' || g.startsWith('HOLD') ? 2600 : 2000;
       const t0 = sim.now();
       const frames = [...sim.run([[350 + 150 * (i % 3), {}]]), ...sim.run(G[g])];
       frames.push(...sim.run([[Math.max(100, windowMs - (sim.now() - t0)), {}]]));

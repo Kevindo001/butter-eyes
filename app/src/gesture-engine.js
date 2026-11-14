@@ -5,7 +5,7 @@
 //   DOUBLE_BLINK          two slow, deliberate blinks (each longer than the person's natural blinks)
 //   WINK_LEFT / RIGHT     one eye closed briefly while the other stays open
 //   HOLD_LEFT / RIGHT     one eye held closed past holdMs (fires while held); HOLD_END on release
-//   BROW_HOLD             eyebrows raised and held >= brow.ms (turns eye control on / off)
+//   BROW_HOLD             eyebrows raised and held >= brow.ms (4 s) (turns eye control on / off)
 //   BOTH_CLOSED           both eyes closed >= bothMs (universal stop / back; always allowed)
 //   LONG_BLINK            both eyes closed >= 500 ms (not a calibrated gesture: quick stop while driving)
 // Status events: FACE_LOST, FACE_FOUND, CALIBRATION_DRIFT
@@ -26,12 +26,12 @@ export const DEFAULT_PARAMS = {
   openT: { L: 0.3, R: 0.3 },
   otherMax: { left: 0.3, right: 0.3 }, // during a LEFT wink, the right eye must stay below this
   asymMin: 0.4,
-  winkMinMs: 180,
+  winkMinMs: 130,
   holdMs: 800,
   graceMs: 90,                 // tolerate a few noisy frames inside a wink
   dbl: { closeMinMs: 250, closeMaxMs: 650, gapMaxMs: 600, quietMs: 250 }, // two slow blinks, each longer than a natural blink
-  bothMs: 2000,
-  brow: { on: 0.45, off: 0.3, ms: 1500 },
+  bothMs: 3000,
+  brow: { on: 0.45, off: 0.3, ms: 4000 },
   refractoryMs: 450,
   faceLostMs: 400,
   enabled: Object.fromEntries(GESTURES.map((g) => [g, true])),
@@ -46,6 +46,9 @@ export class GestureEngine {
   setCalibration(cal) {
     this.cal = cal;
     this.p = cal ? { ...DEFAULT_PARAMS, ...cal.params, enabled: { ...DEFAULT_PARAMS.enabled, ...(cal.params?.enabled || {}) } } : DEFAULT_PARAMS;
+    // how long things must be held is a product decision, not something measured per person:
+    // always use the current values, even with an older saved calibration
+    if (cal) this.p = { ...this.p, winkMinMs: DEFAULT_PARAMS.winkMinMs, bothMs: DEFAULT_PARAMS.bothMs, brow: { ...this.p.brow, ms: DEFAULT_PARAMS.brow.ms } };
   }
 
   reset() {

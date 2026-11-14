@@ -55,7 +55,7 @@ function setControl(on) {
   if (!on && S.screenName === 'drive') screens.drive.stop();
   paintPills();
   if (S.screenName === 'drive') screens.drive.paint();
-  toast(on ? 'Eye control on' : 'Eye control off: blink freely. Raise your eyebrows 2 s to turn it back on.', 3200);
+  toast(on ? 'Eye control on' : 'Eye control off: blink freely. Raise your eyebrows 4 s to turn it back on.', 3200);
 }
 
 // keyboard = caregiver / demo backup, same gestures
@@ -136,7 +136,7 @@ screens.drive = {
       <aside class="sidebar">
         <div class="sidecard" id="ctlCard">
           <small>Eye control</small><b id="ctlState"></b>
-          <span>${canBrow ? 'Raise eyebrows 2 s to switch' : 'Press B to switch'}</span>
+          <span>${canBrow ? 'Raise eyebrows 4 s to switch' : 'Press B to switch'}</span>
         </div>
         <div class="sidecard dim">
           <small>Mode</small><b>Blink drive</b>
@@ -152,7 +152,7 @@ screens.drive = {
           <b>Double blink</b> or <b>long blink</b>: stop<br>
           <b>Close left eye</b>: turn right<br>
           <b>Close right eye</b>: turn left<br>
-          <b>Both eyes 2 s</b>: stop, exit
+          <b>Both eyes 3 s</b>: stop, exit
         </div>
       </aside>
       <div class="feed" id="feed">
@@ -490,12 +490,12 @@ screens.calibrate = {
 // ---------------------------------------------------------------- practice: try each gesture, see it register
 const PRACTICE = [
   { g: 'DOUBLE_BLINK', label: 'Slow double blink', how: 'Two slow, firm blinks' },
-  { g: 'WINK_LEFT', label: 'Wink left', how: 'Close only your left eye, briefly' },
-  { g: 'WINK_RIGHT', label: 'Wink right', how: 'Close only your right eye, briefly' },
+  { g: 'WINK_LEFT', label: 'Wink left', how: 'Close only your left eye, a quick wink' },
+  { g: 'WINK_RIGHT', label: 'Wink right', how: 'Close only your right eye, a quick wink' },
   { g: 'HOLD_LEFT', label: 'Hold left', how: 'Keep your left eye closed 1 second' },
   { g: 'HOLD_RIGHT', label: 'Hold right', how: 'Keep your right eye closed 1 second' },
-  { g: 'BROW_HOLD', label: 'Eyebrows', how: 'Raise your eyebrows 2 seconds' },
-  { g: 'BOTH_CLOSED', label: 'Both eyes closed', how: 'Close both eyes 2 seconds' },
+  { g: 'BROW_HOLD', label: 'Eyebrows', how: 'Raise your eyebrows 4 seconds' },
+  { g: 'BOTH_CLOSED', label: 'Both eyes closed', how: 'Close both eyes 3 seconds' },
 ];
 screens.practice = {
   enter() {
