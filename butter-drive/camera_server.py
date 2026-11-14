@@ -3,6 +3,7 @@
     python3 camera_server.py [--device 0] [--port 5600]
 Stream: http://<jetson-ip>:5600/  (also /stream). Stdlib + OpenCV only."""
 import argparse
+import glob
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -13,16 +14,42 @@ latest = None
 lock = threading.Lock()
 
 
+def open_camera(width, height, prefer=None):
+    """First /dev/video* that actually returns frames (the number changes when the camera is replugged)."""
+    devs = sorted(glob.glob("/dev/video*"), key=lambda d: int(d.replace("/dev/video", "")))
+    if prefer is not None:
+        devs = [f"/dev/video{prefer}"] + [d for d in devs if d != f"/dev/video{prefer}"]
+    for d in devs:
+        cap = cv2.VideoCapture(int(d.replace("/dev/video", "")), cv2.CAP_V4L2)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        ok, _ = cap.read()
+        if ok:
+            print(f"camera: {d}", flush=True)
+            return cap
+        cap.release()
+    return None
+
+
 def grab(dev, width, height):
     global latest
-    cap = cv2.VideoCapture(dev)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    cap, fails = None, 0
     while True:
+        if cap is None:
+            cap = open_camera(width, height, dev)
+            if cap is None:
+                time.sleep(1.0)  # unplugged: keep looking
+                continue
         ok, frame = cap.read()
         if not ok:
-            time.sleep(0.2)
+            fails += 1
+            if fails > 15:  # camera went away: reopen (maybe under a new number)
+                cap.release(); cap, fails = None, 0
+                with lock:
+                    latest = None
+            time.sleep(0.05)
             continue
+        fails = 0
         ok, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
         if ok:
             with lock:
@@ -55,7 +82,7 @@ class H(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--device", type=int, default=0)
+    ap.add_argument("--device", type=int, default=None, help="force /dev/videoN (default: auto)")
     ap.add_argument("--port", type=int, default=5600)
     ap.add_argument("--width", type=int, default=640)
     ap.add_argument("--height", type=int, default=480)

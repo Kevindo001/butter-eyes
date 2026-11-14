@@ -68,11 +68,12 @@ def check_camera():
     rec("stream on :5600", "PASS" if streaming else "WARN", "" if streaming else "not running; start: python3 camera_server.py")
     if devs and not streaming:
         try:
-            import cv2
-            cap = cv2.VideoCapture(0)
-            ok, frame = cap.read()
-            cap.release()
-            rec("grab a frame", "PASS" if ok else "FAIL", f"{frame.shape[1]}x{frame.shape[0]}" if ok else "could not read")
+            from camera_server import open_camera
+            cap = open_camera(640, 480)
+            ok, frame = cap.read() if cap else (False, None)
+            if cap:
+                cap.release()
+            rec("grab a frame", "PASS" if ok else "FAIL", f"{frame.shape[1]}x{frame.shape[0]}" if ok else "no camera returned a frame")
         except ImportError:
             rec("grab a frame", "SKIP", "no OpenCV in this python")
 
