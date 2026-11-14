@@ -32,6 +32,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import threading
 import time
 
@@ -62,6 +63,8 @@ PATTERNS = {
 }
 MAX_TTL_MS = 1000
 PIPER_MODEL = os.path.expanduser("~/Projects/butter/models/piper/en_US-lessac-medium.onnx")
+# piper is installed inside butter_env (next to the python running this), not on PATH
+PIPER = shutil.which("piper") or next((p for p in [os.path.join(os.path.dirname(sys.executable), "piper")] if os.path.exists(p)), None)
 
 
 def usb_speaker():
@@ -232,13 +235,15 @@ class Server:
                     p2 = subprocess.Popen(play, stdin=p1.stdout)
                     p1.stdin.write(base64.b64decode(mp3_b64)); p1.stdin.close()
                     await asyncio.to_thread(p2.wait)
-                elif text and shutil.which("piper") and os.path.exists(PIPER_MODEL):
-                    p1 = subprocess.Popen(["piper", "--model", PIPER_MODEL, "--output_raw"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+                elif text and PIPER and os.path.exists(PIPER_MODEL):
+                    p1 = subprocess.Popen([PIPER, "--model", PIPER_MODEL, "--output_raw"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
                     p2 = subprocess.Popen(["sox", "-t", "raw", "-r", "22050", "-e", "signed", "-b", "16", "-c", "1", "-",
                                            "-t", "wav", "-r", "44100", "-c", "2", "-"], stdin=p1.stdout, stdout=subprocess.PIPE)
                     p3 = subprocess.Popen(play, stdin=p2.stdout)
                     p1.stdin.write(text.encode()); p1.stdin.close()
                     await asyncio.to_thread(p3.wait)
+                else:
+                    log.warning("say: nothing to speak with (no mp3, and Piper not found)")
             except Exception as e:  # never let audio kill the motor server
                 log.error("say failed: %s", e)
 
