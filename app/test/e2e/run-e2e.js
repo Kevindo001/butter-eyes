@@ -297,6 +297,24 @@ try {
     return fill.map((x) => x.toFixed(2)).join(' x ');
   });
 
+  await check('key 0 turns the webcam off (stream stopped, Butter stopped, no frames) and on again', async () => {
+    await page.evaluate(() => window.__butter.go('drive'));
+    await inject('DOUBLE_BLINK'); await inject('DOUBLE_BLINK');
+    assert(await S('screens.drive.dir') === 'forward', 'setup: not driving');
+    await page.keyboard.press('0');
+    await sleep(400);
+    assert(await S('S.tracker.cameraOn') === false && await S('S.cameraOff') === true, 'camera still on');
+    assert(await S('screens.drive.dir') === 'stop', 'Butter kept moving with the webcam off');
+    assert(/Webcam off/.test(await page.locator('#pillFace').textContent()), 'no webcam-off label');
+    const n = await S('S.frames'); await sleep(700);
+    assert(await S('S.frames') === n, 'frames still arriving with the webcam off');
+    await shot('13-webcam-off');
+    await page.keyboard.press('0');
+    await until(() => S('S.tracker.cameraOn === true'), 5000, 'camera back on');
+    const m = await S('S.frames'); await until(async () => (await S('S.frames')) > m + 5, 5000, 'frames resume');
+    await page.evaluate(() => window.__butter.go('home'));
+  });
+
   await check('talk: fake mic voice -> VAD (audio thread) -> ElevenLabs Scribe -> transcript', async () => {
     await page.evaluate(() => { window.__butter.screens.home.i = 3; window.__butter.screens.home.render(); });
     await inject('DOUBLE_BLINK');

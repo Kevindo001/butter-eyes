@@ -69,6 +69,16 @@ export class FaceTracker {
 
   stop() { this.running = false; }
 
+  // really turn the webcam off (the camera light goes out); listeners get one last "no face" frame
+  stopCamera() {
+    this.running = false;
+    if (this.stream) this.stream.getTracks().forEach((t) => t.stop());
+    this.stream = null; this.video.srcObject = null;
+    const now = performance.now();
+    for (const fn of this.listeners) fn({ face: false, multiple: false, lock: 'searching', cameraOff: true }, now);
+  }
+  get cameraOn() { return !!this.stream; }
+
   process(res, t) {
     const vw = this.video.videoWidth || 1280, vh = this.video.videoHeight || 720, ar = vw / vh;
     const all = res.faceLandmarks || [];

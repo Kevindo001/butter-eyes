@@ -735,6 +735,29 @@ function paintHud(frame) {
   const both = $('#bothRing'); if (both) both.style.setProperty('--both', (Math.max(e?.both || 0, e?.brow || 0) * 360).toFixed(0) + 'deg');
 }
 
+// Key 0: webcam off / on. Off means off: the stream is stopped, nothing is read, Butter stops.
+async function toggleCamera() {
+  if (!S.tracker || S.calibrating) return;
+  if (S.tracker.cameraOn) {
+    if (S.screenName === 'drive') screens.drive.stop();
+    S.tracker.stopCamera();
+    if (S.engine) { S.engine.reset(); syncNav(); }
+    S.cameraOff = true;
+    TONES.off(); toast('Webcam off. Press 0 to turn it back on.', 4000);
+  } else {
+    try {
+      await S.tracker.startCamera(S.settings.cameraId || undefined);
+      S.tracker.lock.reset();
+      S.tracker.start();
+      S.cameraOff = false;
+      TONES.on(); toast('Webcam on', 2000);
+    } catch (e) { toast('Could not turn the webcam on: ' + (e.message || e), 5000); }
+  }
+  paintHud.face = undefined;
+  const p = $('#pillFace'); p.classList.toggle('on', false); p.querySelector('b').textContent = S.cameraOff ? 'Webcam off (0)' : 'No face';
+}
+addEventListener('keydown', (e) => { if (e.key === '0' && !e.target.matches('input, textarea') && !e.repeat) toggleCamera(); });
+
 async function initTracking() {
   try {
     S.tracker = new FaceTracker($('#video'));
@@ -744,7 +767,7 @@ async function initTracking() {
     S.tracker.start();
     S.tracker.onFrame((frame, t) => {
       S.lastFrame = frame; S.frames++; if (frame.face) S.faceFrames++;
-      paintHud(frame);
+      if (!frame.cameraOff) paintHud(frame);
       if (!S.engine || S.calibrating) return;
       for (const ev of S.engine.update(frame, t)) dispatch(ev);
     });
