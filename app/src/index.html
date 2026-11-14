@@ -3,12 +3,20 @@
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self' app:; script-src 'self' app: 'wasm-unsafe-eval'; img-src 'self' app: data: blob: http: https:; media-src 'self' app: blob: data: mediastream:; style-src 'self' app: 'unsafe-inline'; connect-src 'self' app: data: blob:; worker-src 'self' app: blob:" />
-  <title>Butter</title>
+  <title>BLINC</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><span class="logo"></span>Butter</div>
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 40 40" aria-hidden="true">
+        <rect width="40" height="40" fill="var(--ink)"/>
+        <path d="M7 13 Q20 4 33 13" fill="none" stroke="var(--lamp)" stroke-width="3.5" stroke-linecap="square"/>
+        <path d="M6 25 Q20 13 34 25 Q20 37 6 25 Z" fill="#fff"/>
+        <rect x="16" y="21" width="8" height="8" fill="var(--ink)"/>
+      </svg>
+      <div class="brandtext"><b>BLINC</b><small>Brow and Lid Input for Navigation and Conversation</small></div>
+    </div>
     <div class="pills">
       <span class="pill status" id="pillFace"><i></i><b>No face</b></span>
       <span class="pill status" id="pillButter"><i></i><b>Butter offline</b></span>
@@ -22,7 +30,7 @@
     <button id="devBtn" class="devbtn" title="Raw face readings">Dev</button>
     <div class="hud">
       <span class="last" id="lastGesture"></span>
-      <div class="eyes" id="bothRing" title="Your eyes, as Butter sees them">
+      <div class="eyes" id="bothRing" title="Your eyes, as BLINC sees them">
         <div class="eyeball" id="eyeL" title="left eye"><span></span></div>
         <div class="eyeball" id="eyeR" title="right eye"><span></span></div>
       </div>

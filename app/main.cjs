@@ -5,6 +5,8 @@ const fs = require('fs');
 const { pathToFileURL } = require('url');
 
 const ROOT = __dirname;
+// The app was renamed to BLINC; keep using the original data folder so saved calibration and settings survive.
+app.setPath('userData', path.join(app.getPath('appData'), 'Butter'));
 
 // ---------- .env (keys stay in this process; never sent to the renderer)
 function loadEnv() {
@@ -79,7 +81,7 @@ function createWindow() {
     minWidth: 1000,
     minHeight: 680,
     backgroundColor: '#0b0d10',
-    title: 'Butter',
+    title: 'BLINC',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     show: !process.env.BUTTER_HEADLESS,
     webPreferences: {

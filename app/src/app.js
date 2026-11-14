@@ -655,7 +655,7 @@ screens.practice = {
   exit() { this.off?.(); api.saveDebug('practice', { counts: this.counts, events: this.events, frames: this.frames }); },
   render() {
     main.innerHTML = `<section class="screen">
-      <div><h1>Try each gesture</h1><h2>Each one lights up when Butter sees it. Press Enter when you're done.</h2></div>
+      <div><h1>Try each gesture</h1><h2>Each one lights up when BLINC sees it. Press Enter when you're done.</h2></div>
       <div class="practice">${PRACTICE.map((p) => `<div class="choice ${this.counts[p.g] ? 'seen' : ''}" data-g="${p.g}">
         <b>${p.label}</b><small>${p.how}</small><span class="count">${this.counts[p.g] ? 'Seen ' + this.counts[p.g] + 'x' : 'Not yet'}</span></div>`).join('')}
       </div>

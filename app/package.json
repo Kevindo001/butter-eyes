@@ -1,8 +1,8 @@
 {
   "name": "butter-eyes",
-  "productName": "Butter",
+  "productName": "BLINC",
   "version": "0.1.0",
-  "description": "Eye-gesture control for Butter + LLM-assisted speech, for people with ALS / Parkinson's. Webcam only.",
+  "description": "BLINC (Brow and Lid Input for Navigation and Conversation): eyebrow and eyelid control for the Butter robot + LLM-assisted speech, for people with ALS / Parkinson's. Webcam only.",
   "type": "module",
   "main": "main.cjs",
   "scripts": {

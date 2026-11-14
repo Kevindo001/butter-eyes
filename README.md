@@ -1,4 +1,6 @@
-# Butter: drive and talk with your eyes
+# BLINC: Brow and Lid Input for Navigation and Conversation
+
+Drive and talk with your eyebrows and eyelids. Butter is the robot it drives.
 
 Webcam-only eye control for people with ALS / Parkinson's. A 2-minute calibration learns your eyes; then you drive a robot (stand-in for a wheelchair) and hold a spoken conversation using deliberate eyelid gestures (double blink, winks, holds, eyes closed). No eye-tracking hardware.
 
