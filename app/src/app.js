@@ -2,8 +2,7 @@
 // What each gesture does lives in mapping.js (provisional, one table).
 import { FaceTracker } from './face-tracker.js';
 import { GestureEngine } from './gesture-engine.js';
-import { fitCalibration, ENROLL, REPS, RELAXED_MS, CLOSED_MS, CLOSED_CHIME_MS, READING_TEXT } from './calibration.js';
-import { fitTransform, closure, closureIntervals } from './closure.js';
+import { fitCalibration, ENROLL, REPS, RELAXED_MS, CLOSED_MS, CLOSED_CHIME_MS } from './calibration.js';
 import { MicListener } from './audio.js';
 import { centerOut } from '../lib/llm.js';
 import { Snake } from './snake.js';
@@ -390,8 +389,7 @@ screens.calibrate = {
     main.innerHTML = `<div class="calib">
       <div class="calstep" id="calstep"></div>
       <div class="label" id="lbl">Getting ready</div><div class="sub" id="sub"></div>
-      <div class="reading" id="reading" hidden></div>
-      <div class="reps" id="reps"></div>
+      <div class="target" id="tgt"><div></div></div>
       <div class="bar"><div id="bar"></div></div></div>`;
     this.run().catch((e) => { console.error(e); $('#lbl').textContent = 'Calibration error'; $('#sub').textContent = String(e.message || e); S.calibrating = false; });
   },
@@ -409,80 +407,75 @@ screens.calibrate = {
       setTimeout(() => { off(); res(into); }, ms * SPEED);
     });
   },
-  set(step, label, sub = '', progress = null) {
-    $('#calstep').textContent = step; $('#lbl').textContent = label; $('#sub').textContent = sub;
-    if (progress !== null) $('#bar').style.width = Math.round(progress * 100) + '%';
+  set(step, label, sub = '') { $('#calstep').textContent = step; $('#lbl').textContent = label; $('#sub').textContent = sub; },
+  // the circle: where to look, and a ring that fills while it's your turn
+  circle(x, y, ringMs = 0) {
+    const t = $('#tgt'); if (!t) return;
+    t.style.left = x + '%'; t.style.top = y + '%';
+    t.classList.remove('fill'); void t.offsetWidth;
+    if (ringMs) { t.style.setProperty('--ring-ms', ringMs * SPEED + 'ms'); t.classList.add('fill'); }
   },
   async run() {
     if (!S.tracker) { this.set('', 'Camera not available', S.trackerError || ''); return; }
-    // ---- 0. setup: one face, close enough, no glare
+    // ---- setup: one face, close enough, no glare (a few seconds at most)
     S.tracker.lock.reset(); S.tracker.lock.setSignature(null);
+    this.circle(50, 58);
     let good = 0;
     const t0 = performance.now();
     await new Promise((res) => {
       const off = S.tracker.onFrame((f) => {
-        const issues = [];
-        if (!f.face) issues.push(f.multiple ? 'Only one person in view, please' : 'Sit in front of the camera');
-        else if (f.eyePx < 22) issues.push('Move a little closer to the screen');
-        if (f.face && f.glare > 0.06) issues.push('Light is reflecting off your glasses. Tilt the screen down a little or dim lights behind you');
-        this.set('Setup', issues[0] || 'Looking good', issues.length ? '' : 'Starting…', 0);
-        good = issues.length ? 0 : good + 1;
-        if (good > 30 || this.cancelled || (performance.now() - t0 > 25000 * SPEED && f.face)) { off(); res(); }
+        const issue = !f.face ? (f.multiple ? 'Only one person in view, please' : 'Sit in front of the camera')
+          : f.eyePx < 22 ? 'Move a little closer to the screen'
+          : f.glare > 0.06 ? 'Light is reflecting off your glasses: tilt the screen down a little' : '';
+        this.set('One minute', issue || 'Look at the circle', '');
+        good = issue ? 0 : good + 1;
+        if (good > 15 || this.cancelled || (performance.now() - t0 > 20000 * SPEED && f.face)) { off(); res(); }
       });
     });
     if (this.cancelled) return;
     const samples = { relaxed: [], closed: [], reps: {}, sig: [] };
     this.sigs = samples.sig;
-    const total = RELAXED_MS + CLOSED_MS + ENROLL.length * REPS * 3400;
-    let done = 0;
-    const prog = (ms) => { done += ms; $('#bar').style.width = Math.min(100, (100 * done) / total) + '%'; };
+    const total = RELAXED_MS + CLOSED_MS + 900 + ENROLL.reduce((a, e) => a + 1200 + REPS * (e.windowMs + 500), 0);
+    const tStart = performance.now();
+    const tick = setInterval(() => { const b = $('#bar'); if (b) b.style.width = Math.min(100, (100 * (performance.now() - tStart)) / (total * SPEED)) + '%'; }, 200);
 
-    // ---- 1. relaxed
-    $('#reading').hidden = false; $('#reading').textContent = READING_TEXT;
-    this.set('Step 1 of 3 · Relax', 'Read this and relax', 'Blink normally and look around. 30 seconds.');
-    const tick = setInterval(() => prog(500), 500 * SPEED);
-    await this.collect(RELAXED_MS, samples.relaxed);
-    clearInterval(tick); done = RELAXED_MS;
-    $('#reading').hidden = true;
-    if (this.cancelled) return;
+    try {
+      // ---- 1. relaxed: follow the circle, blink normally
+      this.set('1 of 3', 'Follow the circle', 'Blink normally. Just relax.');
+      const spots = [[50, 58], [20, 40], [80, 40], [80, 78], [20, 78], [50, 58]];
+      const hop = RELAXED_MS / spots.length;
+      const relaxed = this.collect(RELAXED_MS, samples.relaxed);
+      for (const [x, y] of spots) { this.circle(x, y); await sleep(hop * SPEED); if (this.cancelled) return; }
+      await relaxed;
 
-    // ---- 2. closed
-    this.set('Step 2 of 3 · Close', 'Close both eyes', 'Keep them closed until you hear the chime');
-    setTimeout(() => chime(), CLOSED_CHIME_MS * SPEED);
-    await this.collect(CLOSED_MS, samples.closed);
-    prog(CLOSED_MS);
-    this.set('Step 2 of 3 · Close', 'Open your eyes', '');
-    await sleep(900 * SPEED);
-    // provisional scale, only used to skip gestures someone clearly can't do
-    const okRows = (rows) => rows.filter((f) => f.face).map((f) => f.raw);
-    let tf = null;
-    try { tf = fitTransform(okRows(samples.relaxed), okRows(samples.closed).slice(Math.floor(okRows(samples.closed).length / 3))).tf; } catch {}
+      // ---- 2. closed
+      this.circle(50, 58, CLOSED_CHIME_MS);
+      this.set('2 of 3', 'Close both eyes', 'Keep them closed until the chime');
+      setTimeout(() => chime(), CLOSED_CHIME_MS * SPEED);
+      await this.collect(CLOSED_MS, samples.closed);
+      this.set('2 of 3', 'Open your eyes', '');
+      await sleep(900 * SPEED);
 
-    // ---- 3. gestures
-    for (const [gi, step] of ENROLL.entries()) {
-      if (this.cancelled) return;
-      samples.reps[step.g] = [];
-      this.set(`Step 3 of 3 · ${gi + 1}/${ENROLL.length}`, step.label, step.cue);
-      $('#reps').innerHTML = Array.from({ length: REPS }, (_, i) => `<i data-r="${i}"></i>`).join('');
-      await sleep(2200 * SPEED);
-      let blanks = 0;
-      for (let r = 0; r < REPS; r++) {
-        if (this.cancelled) return;
-        this.set(`Step 3 of 3 · ${gi + 1}/${ENROLL.length}`, 'Now', step.cue);
-        $('#reps').querySelector(`[data-r="${r}"]`).className = 'now';
-        if (step.chimeMs) setTimeout(() => chime(), step.chimeMs * SPEED);
-        const rep = await this.collect(step.windowMs, []);
-        samples.reps[step.g].push(rep);
-        $('#reps').querySelector(`[data-r="${r}"]`).className = 'done';
-        prog(step.windowMs + 1000);
-        this.set(`Step 3 of 3 · ${gi + 1}/${ENROLL.length}`, 'Relax', '');
-        await sleep(1000 * SPEED);
-        if (tf && !looksLikeTried(step.g, rep, tf)) blanks++;
-        if (r === 1 && blanks === 2) { this.set('', 'Skipping this one', 'That\'s OK. Not everyone can do every gesture.'); await sleep(1500 * SPEED); break; }
+      // ---- 3. each gesture twice, on the ring
+      for (const [gi, step] of ENROLL.entries()) {
+        samples.reps[step.g] = [];
+        this.circle(50, 58);
+        this.set(`3 of 3 · ${gi + 1}/${ENROLL.length}`, step.label, step.cue);
+        await sleep(1200 * SPEED);
+        for (let r = 0; r < REPS; r++) {
+          if (this.cancelled) return;
+          this.set(`3 of 3 · ${gi + 1}/${ENROLL.length}`, r ? 'Once more' : 'Now', step.cue);
+          this.circle(50, 58, step.chimeMs || step.windowMs);
+          if (step.chimeMs) setTimeout(() => chime(), step.chimeMs * SPEED);
+          samples.reps[step.g].push(await this.collect(step.windowMs, []));
+          this.circle(50, 58);
+          this.set(`3 of 3 · ${gi + 1}/${ENROLL.length}`, 'Relax', '');
+          await sleep(500 * SPEED);
+        }
       }
-    }
+    } finally { clearInterval(tick); }
 
-    // ---- 4. fit + report card
+    // ---- fit + report card
     const { cal, report } = fitCalibration(samples);
     this.report = report;
     if (cal) {
@@ -502,14 +495,6 @@ screens.calibrate = {
     if (cal) setTimeout(() => { if (S.screenName === 'calibrate' && this.report === report) go('home'); }, 10000);
   },
 };
-
-// did the person attempt this gesture at all? (used only to skip ones they can't do)
-function looksLikeTried(g, rep, tf) {
-  const s = rep.filter((f) => f.face).map((f) => { const c = closure(f.raw, tf); return { t: f.t, cL: c.L, cR: c.R }; });
-  if (g === 'BROW_HOLD') { const b = rep.filter((f) => f.face).map((f) => f.raw.brow); return b.length > 5 && Math.max(...b) - Math.min(...b) > 0.12; }
-  if (g === 'DOUBLE_BLINK') return closureIntervals(s, (x) => Math.min(x.cL, x.cR), 0.5, 0.3).length >= 2;
-  return s.some((x) => Math.abs(x.cL - x.cR) > 0.35);
-}
 
 function chime() {
   try {

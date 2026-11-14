@@ -187,8 +187,8 @@ h2 { font-size: 20px; margin: 4px 0 0; color: var(--ink-2); font-weight: 500; }
 
 /* ---------------------------------------------------------------- calibration */
 .calib { position: absolute; inset: 0; background: var(--wall); z-index: 5; }
-.calib .label { position: absolute; left: 0; right: 0; top: 30%; text-align: center; font-size: 40px; font-weight: 800; letter-spacing: -0.02em; }
-.calib .sub { position: absolute; left: 0; right: 0; top: calc(30% + 62px); text-align: center; color: var(--ink-2); font-size: 19px; }
+.calib .label { position: absolute; left: 0; right: 0; top: 14%; text-align: center; font-size: 40px; font-weight: 800; letter-spacing: -0.02em; }
+.calib .sub { position: absolute; left: 0; right: 0; top: calc(14% + 62px); text-align: center; color: var(--ink-2); font-size: 19px; }
 .calib .bar { position: absolute; left: 30%; right: 30%; bottom: 64px; height: 8px; background: var(--wall-2); border-radius: 4px; overflow: hidden; }
 .calib .bar div { height: 100%; background: var(--lamp-deep); width: 0; transition: width .3s var(--ease); }
 .report { max-width: 720px; margin: 50px auto; background: var(--linen); border-radius: var(--r); padding: 34px 40px; border: 1px solid var(--line); font-size: 18px; line-height: 1.6; box-shadow: var(--shadow); }
@@ -197,12 +197,13 @@ h2 { font-size: 20px; margin: 4px 0 0; color: var(--ink-2); font-weight: 500; }
 .report .warn { color: oklch(45% 0.1 60); font-size: 16px; }
 .report .note { color: var(--ink-2); font-size: 16px; }
 .report b.ok { color: var(--go); } .report b.off { color: var(--ink-3); font-weight: 500; }
+.calib .target { --ring-ms: 0ms; position: absolute; width: 150px; height: 150px; margin: -75px; left: 50%; top: 58%; border-radius: 50% !important; background: var(--wall-2); display: grid; place-items: center; transition: left .8s var(--ease), top .8s var(--ease); }
+.calib .target::before { content: ''; position: absolute; inset: 0; border-radius: 50% !important; background: conic-gradient(var(--lamp-deep) var(--ring, 0deg), transparent 0); }
+.calib .target.fill::before { animation: ring var(--ring-ms) linear forwards; }
+.calib .target div { position: relative; width: 118px; height: 118px; border-radius: 50% !important; background: var(--lamp); border: 34px solid var(--linen); box-sizing: border-box; outline: 22px solid var(--ink); outline-offset: -56px; }
+@property --ring { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@keyframes ring { to { --ring: 360deg; } }
 .calib .calstep { position: absolute; top: 34px; left: 0; right: 0; text-align: center; font-size: 15px; font-weight: 700; color: var(--ink-2); }
-.calib .reading { position: absolute; left: 50%; top: 58%; transform: translateX(-50%); width: min(820px, 80%); font-size: 26px; line-height: 1.6; color: var(--ink); text-wrap: pretty; }
-.calib .reps { position: absolute; left: 0; right: 0; top: calc(30% + 120px); display: flex; justify-content: center; gap: 14px; }
-.calib .reps i { width: 18px; height: 18px; border-radius: 50%; background: var(--wall-2); border: 2px solid var(--oak-line); }
-.calib .reps i.now { background: var(--lamp); border-color: var(--lamp-deep); transform: scale(1.3); }
-.calib .reps i.done { background: var(--ink-2); border-color: var(--ink-2); }
 
 /* ---------------------------------------------------------------- settings */
 .settings { display: flex; flex-direction: column; gap: 10px; max-width: 980px; overflow-y: auto; padding: 4px 6px 12px; }

@@ -1,8 +1,8 @@
 // Calibration v3: learn THIS person's eyes, then prove the settings work before using them.
 //
-//   1. relaxed  (30 s)  read a paragraph, look around, blink normally   -> what "nothing" looks like
+//   1. relaxed  (12 s)  follow a moving circle, blink normally           -> what "nothing" looks like
 //   2. closed   (3 s)   close both eyes until the chime                  -> fully-closed reference + BOTH_CLOSED
-//   3. gestures (5 each) double blink, wink L, wink R, hold L, hold R    -> how they do each one
+//   3. gestures (2 each) double blink, wink L, wink R, hold L, hold R    -> how they do each one
 //   4. fit thresholds between "nothing" and each gesture, with margins
 //   5. replay the recorded calibration through the fitted engine: report card, disable what isn't reliable
 //
@@ -14,19 +14,18 @@ import { GestureEngine, DEFAULT_PARAMS, GESTURES } from './gesture-engine.js';
 const { median, quantile } = stats;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-export const RELAXED_MS = 30000;
+export const RELAXED_MS = 12000;
 export const CLOSED_MS = 3000;
 export const CLOSED_CHIME_MS = 2600;
-export const REPS = 5;
+export const REPS = 2; // whole calibration is about one minute
 export const ENROLL = [
-  { g: 'DOUBLE_BLINK', label: 'Double blink', cue: 'Blink twice, slowly and firmly: close... open... close... open', windowMs: 3000 },
-  { g: 'WINK_LEFT', label: 'Wink left', cue: 'Quick wink with your LEFT eye', windowMs: 2400 },
-  { g: 'WINK_RIGHT', label: 'Wink right', cue: 'Quick wink with your RIGHT eye', windowMs: 2400 },
-  { g: 'HOLD_LEFT', label: 'Hold left', cue: 'Close your LEFT eye and keep it closed until the chime', windowMs: 2800, chimeMs: 1700 },
-  { g: 'HOLD_RIGHT', label: 'Hold right', cue: 'Close your RIGHT eye and keep it closed until the chime', windowMs: 2800, chimeMs: 1700 },
-  { g: 'BROW_HOLD', label: 'Raise eyebrows', cue: 'Raise your eyebrows and hold them up until the chime', windowMs: 3400, chimeMs: 2400 },
+  { g: 'DOUBLE_BLINK', label: 'Double blink', cue: 'Blink twice, slowly and firmly', windowMs: 2600 },
+  { g: 'WINK_LEFT', label: 'Wink left', cue: 'Wink your LEFT eye', windowMs: 2000 },
+  { g: 'WINK_RIGHT', label: 'Wink right', cue: 'Wink your RIGHT eye', windowMs: 2000 },
+  { g: 'HOLD_LEFT', label: 'Hold left', cue: 'Close your LEFT eye until the chime', windowMs: 2600, chimeMs: 1900 },
+  { g: 'HOLD_RIGHT', label: 'Hold right', cue: 'Close your RIGHT eye until the chime', windowMs: 2600, chimeMs: 1900 },
+  { g: 'BROW_HOLD', label: 'Raise eyebrows', cue: 'Raise your eyebrows until the chime', windowMs: 3000, chimeMs: 2300 },
 ];
-export const READING_TEXT = 'Butter is a small robot that you can drive with your eyes. Take your time and read this the way you normally would. Look around the screen, blink whenever you like, and relax. There is nothing to do right now; we are just learning what your eyes look like when you are not giving a command.';
 
 function corr(a, b) {
   const n = a.length; if (n < 5) return 0;
@@ -48,7 +47,7 @@ export function fitCalibration(samples) {
   const faces = (rows) => (rows || []).filter((f) => f.face);
   const relaxed = faces(samples.relaxed);
   const closedAll = faces(samples.closed);
-  if (relaxed.length < 200 || closedAll.length < 20) {
+  if (relaxed.length < 80 || closedAll.length < 15) {
     report.warnings.push('Your face was not visible for most of the calibration. Check lighting and sit in front of the camera.');
     return { cal: null, report };
   }
@@ -97,7 +96,7 @@ export function fitCalibration(samples) {
     const side = e === 'L' ? 'left' : 'right';
     const peaks = [...repSeries[`WINK_${side.toUpperCase()}`], ...repSeries[`HOLD_${side.toUpperCase()}`]]
       .map((r) => Math.max(...r.map((s) => s['c' + e]), 0)).filter((v) => v > 0.35);
-    const peakLow = peaks.length >= 3 ? quantile(peaks, 0.2) : closedMed(e);
+    const peakLow = peaks.length >= 2 ? quantile(peaks, 0.2) : closedMed(e);
     P.closeT[e] = clamp((openP99[e] + Math.min(peakLow, 1)) / 2, 0.35, 0.7);
     P.openT[e] = clamp(Math.max(openP99[e] + 0.05, P.closeT[e] - 0.25), 0.15, P.closeT[e] - 0.1);
   }
@@ -114,12 +113,14 @@ export function fitCalibration(samples) {
       frames.push(...r.filter((s) => s.t >= best.start + 60 && s.t <= best.end - 60));
     }
     if (frames.length < 10) { sideReliable[side] = false; continue; }
-    const other90 = quantile(frames.map((s) => s['c' + o]), 0.9);
-    P.otherMax[side] = clamp(other90 + 0.12, 0.25, P.closeT[o] - 0.04);
-    sideReliable[side] = other90 < P.closeT[o] - 0.1;
+    // typical level of the other eye during this person's winks. A median, not a high percentile:
+    // with only two reps, one natural blink of the open eye would otherwise dominate.
+    const other90 = quantile(frames.map((s) => s['c' + o]), 0.55);
+    P.otherMax[side] = clamp(other90 + 0.2, 0.25, P.closeT[o] - 0.04);
+    sideReliable[side] = other90 < P.closeT[o] - 0.15;
     // the other eye must count as "open" at the level it drags to during this person's winks,
     // or after a natural blink mid-hold it would look stuck closed
-    P.openT[o] = clamp(Math.max(P.openT[o], other90 + 0.05), 0.15, P.closeT[o] - 0.08);
+    P.openT[o] = clamp(Math.max(P.openT[o], other90 + 0.08), 0.15, P.closeT[o] - 0.08);
     if (!sideReliable[side]) report.notes.push(`When you close your ${side} eye, your other eye closes a lot too, so ${side} winks are hard to tell from blinks.`);
     const asym = frames.map((s) => s['c' + e] - s['c' + o]);
     P.asymMin = Math.min(P.asymMin, clamp(quantile(asym, 0.2) * 0.7, 0.3, 0.7));
@@ -128,7 +129,7 @@ export function fitCalibration(samples) {
       if (iv.length) winkDurs.push(Math.max(...iv.map((x) => x.dur)));
     }
   }
-  if (winkDurs.length >= 3) {
+  if (winkDurs.length >= 2) {
     P.winkMinMs = clamp(0.45 * Math.min(...winkDurs), 150, 280);
     P.holdMs = clamp(Math.max(...winkDurs) * 1.3, 650, 1300);
   }
@@ -136,7 +137,8 @@ export function fitCalibration(samples) {
   // natural blinks, so natural blink pairs (which everyone has) can't be mistaken for it.
   const bothLow = Math.min(P.closeT.L, P.closeT.R), bothOff = Math.max(P.openT.L, P.openT.R);
   const nat = closureIntervals(sRelaxed.map(sw), (s) => Math.min(s.cL, s.cR), bothLow, bothOff);
-  const natP95 = nat.length ? quantile(nat.map((x) => x.dur), 0.95) : 180;
+  // a short relaxed sample only catches a few blinks, so never assume natural blinks are shorter than 180 ms
+  const natP95 = Math.max(180, nat.length ? quantile(nat.map((x) => x.dur), 0.95) : 0);
   const dblCloses = [], dblGaps = [];
   for (const r of repSeries.DOUBLE_BLINK) {
     const iv = closureIntervals(r, (s) => Math.min(s.cL, s.cR), bothLow, bothOff);
@@ -146,7 +148,7 @@ export function fitCalibration(samples) {
     }
   }
   P.dbl.closeMinMs = clamp(natP95 + 50, 200, 330);
-  if (dblGaps.length >= 3) {
+  if (dblGaps.length >= 1) {
     const minClose = Math.min(...dblCloses);
     if (minClose * 0.85 < P.dbl.closeMinMs) {
       report.notes.push('Your double blinks were about as quick as your normal blinks. Make each of the two blinks slower and firmer, then recalibrate, or double blink may be unreliable.');
@@ -160,7 +162,7 @@ export function fitCalibration(samples) {
   let brow = null;
   const restB = relaxed.map((f) => f.raw.brow).filter((v) => typeof v === 'number');
   const repB = (samples.reps?.BROW_HOLD || []).map((rep) => quantile(rep.filter((f) => f.face && typeof f.raw.brow === 'number').map((f) => f.raw.brow), 0.7)).filter((v) => !Number.isNaN(v));
-  if (restB.length > 100 && repB.length >= 3) {
+  if (restB.length > 100 && repB.length >= 1) {
     const rest = median(restB), raised = median(repB);
     if (raised - rest > 0.15) brow = { rest, raised };
     else report.notes.push('Raising your eyebrows barely showed up on camera, so that gesture is off.');

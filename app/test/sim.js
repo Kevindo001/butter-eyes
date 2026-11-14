@@ -88,10 +88,10 @@ export const G = {
 export const doGesture = (sim, g, settle = 700) => [...sim.run([[300 + 200 * Math.random(), {}]]), ...sim.run(G[g]), ...sim.run([[settle, {}]])];
 
 // Builds calibration samples the way the app's calibration screen collects them.
-export function simCalibrationSamples(sim, { reps = 5, skip = [] } = {}) {
+export function simCalibrationSamples(sim, { reps = 2, skip = [] } = {}) {
   const fr = (a) => a.map((x) => ({ t: x.t, ...x.f }));
   sim.run([[1000, {}]]);
-  const relaxed = fr(sim.run([[30000, {}]]));
+  const relaxed = fr(sim.run([[12000, {}]]));
   const closed = fr([...sim.run([[350, {}]]), ...sim.run([[2650, { lidL: 1, lidR: 1 }]])]);
   sim.run([[800, {}]]);
   const out = { relaxed, closed, reps: {} };
@@ -100,12 +100,12 @@ export function simCalibrationSamples(sim, { reps = 5, skip = [] } = {}) {
     out.reps[g] = [];
     if (skip.includes(g)) continue;
     for (let i = 0; i < reps; i++) {
-      const windowMs = g === 'BROW_HOLD' ? 3400 : g === 'DOUBLE_BLINK' ? 3000 : g.startsWith('HOLD') ? 2800 : 2400;
+      const windowMs = g === 'BROW_HOLD' ? 3000 : g === 'DOUBLE_BLINK' || g.startsWith('HOLD') ? 2600 : 2000;
       const t0 = sim.now();
       const frames = [...sim.run([[350 + 150 * (i % 3), {}]]), ...sim.run(G[g])];
       frames.push(...sim.run([[Math.max(100, windowMs - (sim.now() - t0)), {}]]));
       out.reps[g].push(fr(frames));
-      sim.run([[800, {}]]);
+      sim.run([[500, {}]]);
     }
   }
   return out;

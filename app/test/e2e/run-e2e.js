@@ -80,7 +80,7 @@ async function launch(video, audio, extraEnv = {}) {
 }
 async function close(app) { await Promise.race([app.close().catch(() => {}), sleep(4000)]); try { app.process().kill('SIGKILL'); } catch {} }
 
-let { app, page, errors } = await launch(arg('video'), arg('audio'), { BUTTER_CAL_SPEED: '0.12' });
+let { app, page, errors } = await launch(arg('video'), arg('audio'), { BUTTER_CAL_SPEED: '0.3' });
 const shot = (n) => page.screenshot({ path: path.join(SHOTS, n + '.png') });
 const inject = (type, extra = {}) => page.evaluate(([t, x]) => window.__butter.inject(t, x), [type, extra]);
 const screen = () => page.evaluate(() => window.__butter.S.screenName);
@@ -287,7 +287,7 @@ try {
   await check('calibration on a still photo (fast mode): skips gestures it can\'t see, fails safely, keeps old calibration', async () => {
     const before = await S('S.store.calibration.createdAt');
     await page.keyboard.press('c');
-    await until(() => page.locator('#reading').isVisible(), 20000, 'relaxed reading step');
+    await until(async () => (await page.locator('#lbl').textContent()).includes('Follow the circle'), 20000, 'follow-the-circle step');
     await shot('09-cal-reading');
     await until(() => page.locator('.report').count(), 90000, 'report card');
     await shot('10-cal-report');

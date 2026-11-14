@@ -59,12 +59,12 @@ Right now: Home: wink to move, double blink to open. Talk: wink to pick between 
 
 Keyboard backup (caregiver / demo): Q / E or arrow keys = wink left/right, Space = double blink, hold A / D = hold left/right, S = long blink, B = eye control on/off, Esc = close both eyes, C = recalibrate.
 
-## Calibration (about 2 minutes, per person)
+## Calibration (about 1 minute, per person)
 
 1. **Setup:** waits until there's one face, close enough, and no glare on glasses.
-2. **Relax (30 s):** read a paragraph, blink normally. This learns what "no command" looks like for you: resting eyelids, natural blink timing, glasses.
+2. **Follow the circle (12 s):** blink normally. This learns what "no command" looks like for you: resting eyelids, natural blink length, glasses.
 3. **Close both eyes** until the chime: your fully-closed reference.
-4. **Each gesture 5 times.** It skips gestures you clearly can't do.
+4. **Each gesture twice,** while the ring around the circle fills: slow double blink, wink left, wink right, hold left, hold right, raise eyebrows.
 5. **Report card:** the calibration recording is replayed through the fitted settings. Gestures that weren't reliable, or that fired while you were relaxed, are turned off.
 
 How it handles different eyes:
