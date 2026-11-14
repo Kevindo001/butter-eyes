@@ -153,7 +153,6 @@ export function fitCalibration(samples) {
 
   // ---- 5. replay the calibration through the fitted engine: the report card
   const cal = { version: 3, createdAt: Date.now(), tf, swapB, swapSides, params: P };
-  report.debug = { swapB, swapSides, closeT: P.closeT, openT: P.openT, otherMax: P.otherMax, asymMin: P.asymMin, openP99 };
   const replay = (rows, enabled) => {
     const eng = new GestureEngine({ ...cal, params: { ...P, enabled } });
     const out = [];

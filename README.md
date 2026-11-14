@@ -21,24 +21,26 @@ cd ~/Projects/butter-eyes && ./start.sh
 * First launch: allow Camera and Microphone (System Settings, Privacy & Security, if it doesn't ask), then do the calibration.
 * Keys live in `app/.env` (DeepSeek + ElevenLabs). Never commit it.
 
-## Bring up the Jetson (not done yet: confirm motors + camera)
+## Jetson (Butter)
+
+Connect the Mac to the Jetson's USB-C port with a data cable: the Jetson is then always `192.168.55.1`, no Wi-Fi needed. (Tailscale `100.127.78.50` works too when both are online.)
 
 ```bash
-# from the Mac
-scp -r ~/Projects/butter-eyes/butter-drive butter:~/Projects/
-ssh butter
-cd ~/Projects/butter-drive && ./setup_jetson.sh
-python3 jetson_check.py           # PUT BUTTER ON BLOCKS FIRST
+# from the Mac: copy the robot code over and check it (nothing moves)
+scp -r ~/Projects/butter-eyes/butter-drive anhdo001@192.168.55.1:~/Projects/
+ssh anhdo001@192.168.55.1 '~/Projects/butter-drive/setup_jetson.sh'
+
+# motor check, Butter ON BLOCKS: one wheel at a time, then whole-robot moves
+ssh anhdo001@192.168.55.1 'cd ~/Projects/butter-drive && ~/Projects/butter/butter_env/bin/python3 jetson_check.py --wheel LF'
+ssh anhdo001@192.168.55.1 'cd ~/Projects/butter-drive && ~/Projects/butter/butter_env/bin/python3 jetson_check.py --move forward'
+
+# start the drive server + camera stream (SPEED=0.1-1.0, default 0.35)
+ssh anhdo001@192.168.55.1 '~/Projects/butter-drive/run.sh'
 ```
 
-`jetson_check.py` walks through: Python packages, other services holding the GPIO (stop the follow-me loop first), each wheel forward/back one at a time (asks you to confirm, tells you which pins to swap if one runs backwards), whole-robot moves, camera devices + MJPEG stream on :5600, and the speaker. It ends with a PASS/FAIL summary.
+Then `./start.sh` on the Mac finds Butter over the cable automatically.
 
-When it passes:
-```bash
-python3 server.py                  # motor server on :8770
-python3 camera_server.py           # only if your existing camera stream isn't running
-```
-Then on the Mac `./start.sh` picks the Jetson up automatically. To start at boot later, see `butter-drive/butter-drive.service`.
+Wiring (from `~/Projects/butter/config/motor.md` on the Jetson): wheels LF 11/13, LR 16/15 (reversed), RF 33/31, RR 29/18; L298N enable pins 12, 35, 7, 32 carry software PWM for speed and are LOW whenever stopped. Everything runs with `~/Projects/butter/butter_env/bin/python3` (that's where Jetson.GPIO works), no sudo needed.
 
 ## Inputs (eyelid gestures only)
 
@@ -91,7 +93,7 @@ Motors stop when: the face is lost, eyes close 2 s, the app or Wi-Fi drops (450 
 
 ## Open items to confirm
 
-1. **Jetson:** run `jetson_check.py`: wheel directions, the camera stream path on :5600, speaker card still `hw:2,0`.
+1. **Jetson:** run the motor check on blocks (left-rear wheel had a hardware fault in July), plug in the USB speaker, join Wi-Fi.
 2. **Real eyes:** gestures were tested on simulated people and a still photo, not live eyes yet. Calibrate each team member on the demo laptop under venue-like light and check the report cards.
 3. **Mic at the venue:** noisy rooms can trigger speech detection; the caregiver text box is the fallback.
 4. **Name / acronym:** placeholder "Butter".

@@ -117,3 +117,24 @@ def test_bad_direction_rejected():
             assert motors.state == "stop"
         wd.cancel(); ws_srv.close()
     run(t())
+
+
+def test_left_rear_is_reversed_and_enable_pins_are_separate():
+    assert S.WHEELS["LR"] == (16, 15)
+    direction_pins = {p for pair in S.WHEELS.values() for p in pair}
+    assert set(S.ENABLE_PINS) == {12, 35, 7, 32}
+    assert not direction_pins & set(S.ENABLE_PINS)
+
+
+def test_speed_command_clamps():
+    async def t():
+        motors, srv, wd, ws_srv, url = await _start()
+        async with websockets.connect(url) as ws:
+            await ws.send(json.dumps({"cmd": "speed", "value": 5}))
+            assert (await _recv_type(ws, "speed"))["value"] == 1.0
+            await ws.send(json.dumps({"cmd": "speed", "value": 0.01}))
+            assert (await _recv_type(ws, "speed"))["value"] == 0.1
+            await ws.send(json.dumps({"cmd": "speed", "value": "fast"}))
+            assert "bad speed" in (await _recv_type(ws, "error"))["error"]
+        wd.cancel(); ws_srv.close()
+    run(t())

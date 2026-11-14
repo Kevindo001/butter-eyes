@@ -1,44 +1,55 @@
 #!/usr/bin/env python3
 """
-butter-drive: tiny WebSocket motor server for Butter (Jetson Orin Nano, 4x mecanum, on/off H-bridges).
+butter-drive: tiny WebSocket motor server for Butter (Jetson Orin Nano, 4x mecanum, 2x L298N).
 
-    python3 server.py                 # real motors (Jetson.GPIO)
-    python3 server.py --mock          # anywhere: prints motor states, no GPIO
+    ~/Projects/butter/butter_env/bin/python3 server.py     # real motors (Jetson.GPIO lives in butter_env)
+    python3 server.py --mock                               # anywhere: prints motor states, no GPIO
+    options: --speed 0.35 (0.1-1.0, default duty)  --port 8770
 
 Protocol (JSON over ws://<jetson>:8770):
   -> {"cmd":"hello"}                          <- {"type":"hello","robot":"butter","mock":bool}
   -> {"cmd":"drive","dir":"forward","ttl":450} <- {"type":"ack","dir":"forward"}
        dir: forward|backward|left|right|strafe_left|strafe_right|stop   (left/right = rotate in place)
-  -> {"cmd":"say","text":"hi","mp3":"<base64>"}  plays mp3 if given (ffmpeg), else espeak text
+  -> {"cmd":"speed","value":0.35}             <- {"type":"speed","value":0.35}   (0.1-1.0)
+  -> {"cmd":"say","text":"hi","mp3":"<base64>"}  plays mp3 if given (ffmpeg), else Piper speaks the text
   -> {"cmd":"status"}                         <- {"type":"status","dir":..,"clients":n}
 
 SAFETY
   * Motors stop if no drive command arrives within its ttl (default 450 ms, capped at 1000 ms).
   * Motors stop when the controlling client disconnects, and on exit/SIGTERM.
   * Only one controller at a time: the newest client to send "drive" owns the motors.
-  * Stop any other service that drives the GPIO (e.g. the follow-me loop) before running this.
+  * The L298N enable pins are LOW whenever stopped, so a stuck direction pin can't move a wheel.
+  * Stop anything else that drives the GPIO (follow-me, wasd scripts) before running this.
+
+Wiring is copied from ~/Projects/butter/config/motor.md (confirmed working there).
 """
 import argparse
 import asyncio
 import base64
 import json
 import logging
+import os
 import shutil
 import signal
 import subprocess
+import threading
 import time
 
 import websockets
 
 log = logging.getLogger("butter-drive")
 
-# Pin map (BOARD numbering) from Anh's Butter notes. Each wheel = (IN1, IN2); forward = IN2 HIGH, IN1 LOW.
+# BOARD numbering. Each wheel = (IN1, IN2); forward = IN2 HIGH, IN1 LOW.
 WHEELS = {
     "LF": (11, 13),
-    "LR": (15, 16),
+    "LR": (16, 15),  # wired reversed on the chassis; the swapped order compensates
     "RF": (33, 31),
     "RR": (29, 18),
 }
+# L298N enable pins (jumpers removed): software PWM on these sets the speed.
+ENABLE_PINS = (12, 35, 7, 32)  # left ENA, ENB, right ENA, ENB
+PWM_PERIOD = 0.02  # 50 Hz, same as test/10_wasd_multikey_drive.py
+MIN_SPEED, MAX_SPEED = 0.1, 1.0
 # +1 forward, -1 backward, 0 off. Mecanum X-roller layout.
 PATTERNS = {
     "stop":         {"LF": 0,  "LR": 0,  "RF": 0,  "RR": 0},
@@ -50,16 +61,28 @@ PATTERNS = {
     "strafe_right": {"LF": 1,  "LR": -1, "RF": -1, "RR": 1},
 }
 MAX_TTL_MS = 1000
-# Settings from the existing Butter audio pipeline (speaker = card 2, S16_LE 44.1k stereo only)
-APLAY = ["aplay", "-q", "-D", "hw:2,0"]
-ESPEAK = ["espeak", "-v", "en-us+m5", "-s", "170", "--stdout"]
+PIPER_MODEL = os.path.expanduser("~/Projects/butter/models/piper/en_US-lessac-medium.onnx")
+
+
+def usb_speaker():
+    """ALSA device of the USB speaker (its card number changes with what's plugged in), or None."""
+    try:
+        out = subprocess.run(["aplay", "-l"], capture_output=True, text=True, timeout=3).stdout
+    except Exception:
+        return None
+    for line in out.splitlines():
+        if line.startswith("card ") and "USB" in line:
+            return f"plughw:{line.split()[1].rstrip(':')},0"
+    return None
 
 
 class Motors:
-    def __init__(self, mock: bool):
+    def __init__(self, mock: bool, speed: float = 0.35):
         self.mock = mock
         self.state = "stop"
+        self.speed = max(MIN_SPEED, min(MAX_SPEED, speed))
         self.history = []  # (time, dir) for tests/debugging
+        self._run = True
         if not mock:
             import Jetson.GPIO as GPIO  # noqa: N814
             self.GPIO = GPIO
@@ -68,6 +91,30 @@ class Motors:
             for a, b in WHEELS.values():
                 GPIO.setup(a, GPIO.OUT, initial=GPIO.LOW)
                 GPIO.setup(b, GPIO.OUT, initial=GPIO.LOW)
+            GPIO.setup(list(ENABLE_PINS), GPIO.OUT, initial=GPIO.LOW)
+            threading.Thread(target=self._pwm_loop, daemon=True).start()
+
+    def _pwm_loop(self):
+        """Software PWM on the enable pins. Enable stays LOW whenever stopped."""
+        G, pins = self.GPIO, list(ENABLE_PINS)
+        while self._run:
+            duty = self.speed if self.state != "stop" else 0.0
+            if duty <= 0.0:
+                G.output(pins, G.LOW)
+                time.sleep(PWM_PERIOD)
+            elif duty >= 1.0:
+                G.output(pins, G.HIGH)
+                time.sleep(PWM_PERIOD)
+            else:
+                G.output(pins, G.HIGH)
+                time.sleep(PWM_PERIOD * duty)
+                G.output(pins, G.LOW)
+                time.sleep(PWM_PERIOD * (1 - duty))
+        G.output(pins, G.LOW)
+
+    def set_speed(self, value):
+        self.speed = max(MIN_SPEED, min(MAX_SPEED, float(value)))
+        return self.speed
 
     def pins_for(self, direction):
         """Return {pin: level} for a direction. Pure, used by tests."""
@@ -97,7 +144,10 @@ class Motors:
 
     def cleanup(self):
         self.set("stop")
+        self._run = False
         if not self.mock:
+            time.sleep(PWM_PERIOD * 2)
+            self.GPIO.output(list(ENABLE_PINS), self.GPIO.LOW)
             self.GPIO.cleanup()
 
 
@@ -135,7 +185,7 @@ class Server:
                     continue
                 cmd = msg.get("cmd")
                 if cmd == "hello":
-                    await ws.send(json.dumps({"type": "hello", "robot": "butter", "mock": self.m.mock}))
+                    await ws.send(json.dumps({"type": "hello", "robot": "butter", "mock": self.m.mock, "speed": self.m.speed}))
                 elif cmd == "drive":
                     d = msg.get("dir", "stop")
                     if d not in PATTERNS:
@@ -146,10 +196,16 @@ class Server:
                     self.deadline = time.monotonic() + ttl
                     self.m.set(d)
                     await ws.send(json.dumps({"type": "ack", "dir": d}))
+                elif cmd == "speed":
+                    try:
+                        v = self.m.set_speed(msg.get("value"))
+                        await ws.send(json.dumps({"type": "speed", "value": v}))
+                    except (TypeError, ValueError):
+                        await ws.send(json.dumps({"type": "error", "error": "bad speed"}))
                 elif cmd == "say":
                     asyncio.create_task(self.say(msg.get("text", ""), msg.get("mp3")))
                 elif cmd == "status":
-                    await ws.send(json.dumps({"type": "status", "dir": self.m.state, "clients": len(self.clients)}))
+                    await ws.send(json.dumps({"type": "status", "dir": self.m.state, "speed": self.m.speed, "clients": len(self.clients)}))
         except websockets.ConnectionClosed:
             pass
         finally:
@@ -162,28 +218,33 @@ class Server:
     async def say(self, text, mp3_b64):
         async with self.say_lock:
             if self.m.mock:
-                log.info("say: %r (%s)", text, "mp3" if mp3_b64 else "espeak")
+                log.info("say: %r (%s)", text, "mp3" if mp3_b64 else "piper")
                 return
+            dev = usb_speaker()
+            if not dev:
+                log.warning("say: no USB speaker found (aplay -l)")
+                return
+            play = ["aplay", "-q", "-D", dev]
             try:
                 if mp3_b64 and shutil.which("ffmpeg"):
-                    data = base64.b64decode(mp3_b64)
                     dec = ["ffmpeg", "-loglevel", "error", "-i", "pipe:0", "-ar", "44100", "-ac", "2", "-f", "wav", "pipe:1"]
                     p1 = subprocess.Popen(dec, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-                    p2 = subprocess.Popen(APLAY, stdin=p1.stdout)
-                    p1.stdin.write(data); p1.stdin.close()
+                    p2 = subprocess.Popen(play, stdin=p1.stdout)
+                    p1.stdin.write(base64.b64decode(mp3_b64)); p1.stdin.close()
                     await asyncio.to_thread(p2.wait)
-                elif text:
-                    p1 = subprocess.Popen(ESPEAK + [text], stdout=subprocess.PIPE)
-                    p2 = subprocess.Popen(["sox", "-t", "wav", "-", "-t", "wav", "-r", "44100", "-c", "2", "-"],
-                                          stdin=p1.stdout, stdout=subprocess.PIPE)
-                    p3 = subprocess.Popen(APLAY, stdin=p2.stdout)
+                elif text and shutil.which("piper") and os.path.exists(PIPER_MODEL):
+                    p1 = subprocess.Popen(["piper", "--model", PIPER_MODEL, "--output_raw"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+                    p2 = subprocess.Popen(["sox", "-t", "raw", "-r", "22050", "-e", "signed", "-b", "16", "-c", "1", "-",
+                                           "-t", "wav", "-r", "44100", "-c", "2", "-"], stdin=p1.stdout, stdout=subprocess.PIPE)
+                    p3 = subprocess.Popen(play, stdin=p2.stdout)
+                    p1.stdin.write(text.encode()); p1.stdin.close()
                     await asyncio.to_thread(p3.wait)
             except Exception as e:  # never let audio kill the motor server
                 log.error("say failed: %s", e)
 
 
 async def main(args):
-    motors = Motors(args.mock)
+    motors = Motors(args.mock, args.speed)
     srv = Server(motors)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -202,6 +263,7 @@ if __name__ == "__main__":
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8770)
     ap.add_argument("--mock", action="store_true")
+    ap.add_argument("--speed", type=float, default=0.35, help="motor duty 0.1-1.0")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     asyncio.run(main(a))

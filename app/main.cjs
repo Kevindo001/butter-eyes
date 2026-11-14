@@ -22,9 +22,6 @@ loadEnv();
 const DEFAULT_SETTINGS = {
   butterUrl: process.env.BUTTER_URL || 'ws://100.127.78.50:8770',
   butterCameraUrl: process.env.BUTTER_CAMERA_URL || 'http://100.127.78.50:5600/',
-  profile: 'eyes',          // eyes | winks | clutch
-  gazeEnter: 0.55,
-  gazeHoldMs: 280,
   voiceOut: 'laptop',       // laptop | butter | both
   voiceId: '',
   persona: '',

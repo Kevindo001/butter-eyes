@@ -1,13 +1,14 @@
-# Optional: start the drive server at boot, only after jetson_check.py passes.
+# Optional: start the drive server at boot (after the motor check passes).
 #   sudo cp butter-drive.service /etc/systemd/system/ && sudo systemctl enable --now butter-drive
 [Unit]
 Description=Butter drive server (eye app motor control)
 After=network-online.target butter-pinmux.service
+Requires=butter-pinmux.service
 
 [Service]
-User=REPLACE_WITH_JETSON_USER
-WorkingDirectory=/home/REPLACE_WITH_JETSON_USER/Projects/butter-drive
-ExecStart=/usr/bin/python3 server.py --port 8770
+User=anhdo001
+WorkingDirectory=/home/anhdo001/Projects/butter-drive
+ExecStart=/home/anhdo001/Projects/butter/butter_env/bin/python3 server.py --port 8770
 Restart=on-failure
 RestartSec=2
 

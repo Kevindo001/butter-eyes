@@ -173,8 +173,6 @@ h2 { font-size: 20px; margin: 4px 0 0; color: var(--ink-2); font-weight: 500; }
 
 /* ---------------------------------------------------------------- calibration */
 .calib { position: absolute; inset: 0; background: var(--wall); z-index: 5; }
-.calib .target { position: absolute; width: 76px; height: 76px; margin: -38px; border-radius: 50%; background: var(--ink); border: 14px solid var(--lamp); box-shadow: 0 10px 24px -6px oklch(55% 0.12 80 / .5); transition: left .6s var(--ease), top .6s var(--ease), transform .4s var(--ease), opacity .3s; }
-.calib .target.collect { transform: scale(.5); }
 .calib .label { position: absolute; left: 0; right: 0; top: 30%; text-align: center; font-size: 40px; font-weight: 800; letter-spacing: -0.02em; }
 .calib .sub { position: absolute; left: 0; right: 0; top: calc(30% + 62px); text-align: center; color: var(--ink-2); font-size: 19px; }
 .calib .bar { position: absolute; left: 30%; right: 30%; bottom: 64px; height: 8px; background: var(--wall-2); border-radius: 4px; overflow: hidden; }

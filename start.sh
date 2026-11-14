@@ -54,9 +54,13 @@ cleanup() { [ -n "$MOCK_PID" ] && kill "$MOCK_PID" 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
 if [ "$MODE" = auto ]; then
-  if reachable "$JETSON_IP"; then MODE=jetson; else
-    say "Jetson drive server not reachable at $JETSON_IP:8770, using the mock robot."
-    say "(Start it on the Jetson with: cd ~/Projects/butter-drive && python3 server.py)"
+  # try the USB-C cable first (always 192.168.55.1), then Tailscale
+  for ip in 192.168.55.1 "$JETSON_IP"; do
+    if reachable "$ip"; then JETSON_IP="$ip"; MODE=jetson; break; fi
+  done
+  if [ "$MODE" = jetson ]; then :; else
+    say "Jetson drive server not reachable (USB 192.168.55.1 or $JETSON_IP), using the mock robot."
+    say "(Start it on the Jetson with: ~/Projects/butter-drive/run.sh)"
     MODE=mock
   fi
 fi
