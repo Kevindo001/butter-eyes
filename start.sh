@@ -47,7 +47,13 @@ if [ "$MODE" = test ]; then
   exit 0
 fi
 
-reachable() { nc -z -G 2 "$1" 8770 >/dev/null 2>&1 || nc -z -w 2 "$1" 8770 >/dev/null 2>&1; }
+# hard 3 s limit: with the cable unplugged, nc to the cable address can hang instead of failing
+reachable() {
+  nc -z "$1" 8770 >/dev/null 2>&1 & local pid=$!
+  ( sleep 3; kill "$pid" 2>/dev/null ) >/dev/null 2>&1 & local killer=$!
+  if wait "$pid" 2>/dev/null; then kill "$killer" 2>/dev/null; return 0; fi
+  kill "$killer" 2>/dev/null; return 1
+}
 
 MOCK_PID=""
 cleanup() { [ -n "$MOCK_PID" ] && kill "$MOCK_PID" 2>/dev/null || true; }
