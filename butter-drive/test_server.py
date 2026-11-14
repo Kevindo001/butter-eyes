@@ -133,7 +133,7 @@ def test_speed_command_clamps():
             await ws.send(json.dumps({"cmd": "speed", "value": 5}))
             assert (await _recv_type(ws, "speed"))["value"] == 1.0
             await ws.send(json.dumps({"cmd": "speed", "value": 0.01}))
-            assert (await _recv_type(ws, "speed"))["value"] == 0.1
+            assert (await _recv_type(ws, "speed"))["value"] == 0.05
             await ws.send(json.dumps({"cmd": "speed", "value": "fast"}))
             assert "bad speed" in (await _recv_type(ws, "error"))["error"]
         wd.cancel(); ws_srv.close()

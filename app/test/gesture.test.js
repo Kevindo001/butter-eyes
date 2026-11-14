@@ -290,3 +290,19 @@ test('QUICK calibration: 10 min relaxed -> zero commands; gestures caught withou
     assert.ok(hit / n >= 0.93, g); assert.ok(wrong <= 2, g + ' confusions ' + wrong);
   }
 });
+
+// ------------------------------------------------------------------ crowd behind the user
+test('face lock in a crowd: smaller faces behind the user are ignored, even when the user leaves and returns', async () => {
+  const { FaceLock } = await import('../src/face-lock.js');
+  const lock = new FaceLock();
+  const user = { cx: 0.5, cy: 0.5, size: 0.3, sig: null }, crowd = [{ cx: 0.2, cy: 0.3, size: 0.09, sig: null }, { cx: 0.8, cy: 0.35, size: 0.12, sig: null }];
+  let t = 0, r;
+  for (let i = 0; i < 40; i++) r = lock.update([user], (t += 33));
+  assert.equal(r.status, 'locked');
+  for (let i = 0; i < 30; i++) r = lock.update([crowd[0], user, crowd[1]], (t += 33));
+  assert.deepEqual([r.index, r.status, r.multiple, r.ignored], [1, 'locked', false, 2], 'user kept, crowd not even counted');
+  for (let i = 0; i < 60; i++) r = lock.update(crowd, (t += 33)); // user leans out of frame
+  assert.equal(r.index, null, 'nobody in the crowd takes over');
+  for (let i = 0; i < 40; i++) r = lock.update([crowd[0], crowd[1], user], (t += 33));
+  assert.deepEqual([r.index, r.status], [2, 'locked'], 'user picked up again');
+});

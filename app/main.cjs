@@ -24,7 +24,7 @@ const DEFAULT_SETTINGS = {
   butterCameraUrl: process.env.BUTTER_CAMERA_URL || 'http://100.127.78.50:5600/',
   voiceOut: 'laptop',       // laptop | butter | both
   driveMode: 'look',        // look = eyes pick direction, eyebrows move | blink = double blink / winks
-  driveSpeed: 0.1,          // motor power 0.1-1.0 (0.1 = crawl)
+  driveSpeed: 0.05,         // motor power 0.05-1.0 (0.05 = crawl)
   voiceId: '',
   persona: '',
   cameraId: '',
@@ -65,7 +65,7 @@ async function initServices() {
     url: store.settings.butterUrl,
     onStatus: (s) => win?.webContents.send('butter:status', s),
   });
-  if (!store.settings.speedV2) { store.settings.driveSpeed = 0.1; store.settings.speedV2 = true; } // one-time: team asked for 10%
+  if (!store.settings.speedV3) { store.settings.driveSpeed = 0.05; store.settings.speedV3 = true; store.voiceExamples = []; } // one-time: team asked for 5% and a clean Talk memory
   butter.setSpeed(store.settings.driveSpeed);
   log('services: llm', !!process.env.DEEPSEEK_API_KEY, 'speech', speech.enabled, 'butter', store.settings.butterUrl);
 }
@@ -125,6 +125,7 @@ ipcMain.handle('store:settings', (_e, patch) => {
   return store.settings;
 });
 ipcMain.handle('store:calibration', (_e, cal) => { store.calibration = cal; saveStore(); return true; });
+ipcMain.handle('store:clearTalk', () => { store.voiceExamples = []; saveStore(); return true; });
 ipcMain.handle('store:voiceExample', (_e, text) => {
   store.voiceExamples = [...store.voiceExamples.filter((t) => t !== text), text].slice(-40);
   saveStore();

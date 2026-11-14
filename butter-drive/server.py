@@ -50,7 +50,7 @@ WHEELS = {
 # L298N enable pins (jumpers removed): software PWM on these sets the speed.
 ENABLE_PINS = (12, 35, 7, 32)  # left ENA, ENB, right ENA, ENB
 PWM_PERIOD = 0.02  # 50 Hz, same as test/10_wasd_multikey_drive.py
-MIN_SPEED, MAX_SPEED = 0.1, 1.0
+MIN_SPEED, MAX_SPEED = 0.05, 1.0
 # +1 forward, -1 backward, 0 off. Mecanum X-roller layout.
 PATTERNS = {
     "stop":         {"LF": 0,  "LR": 0,  "RF": 0,  "RR": 0},

@@ -97,7 +97,9 @@ export class FaceTracker {
       face: true,
       raw: { b: { L: bs.eyeBlinkLeft, R: bs.eyeBlinkRight }, r, brow: (bs.browInnerUp + bs.browOuterUpLeft + bs.browOuterUpRight) / 3,
         // sideways eye direction (sign and scale are learned in calibration from the circle)
-        gaze: ((bs.eyeLookOutLeft + bs.eyeLookInRight) - (bs.eyeLookInLeft + bs.eyeLookOutRight)) / 2 },
+        gaze: ((bs.eyeLookOutLeft + bs.eyeLookInRight) - (bs.eyeLookInLeft + bs.eyeLookOutRight)) / 2,
+        // head turn: where the nose tip sits between the two sides of the face (0 = straight at the camera)
+        yaw: (P[1].x - (P[234].x + P[454].x) / 2) / Math.max(1e-6, Math.abs(P[454].x - P[234].x)) },
       eyePx: eyeWidthPx(P, vw),
       glare: this.glare,
       multiple: lk.multiple,

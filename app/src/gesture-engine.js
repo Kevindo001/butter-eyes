@@ -20,7 +20,7 @@ const LEAD_MS = 70; // in an ordinary blink one eye can lead the other by a few 
 
 export const GESTURES = ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT', 'BROW_HOLD', 'BOTH_CLOSED'];
 export const BROW_TAP_MIN_MS = 120, BROW_SELECT_MS = 1000; // quick eyebrow raise = next, 1 s hold = select
-export const BROW_MOVE_MS = 150;  // Drive: eyebrows up this long = start moving; down = stop
+export const BROW_MOVE_MS = 200, BROW_MOVE_ON = 0.6;  // Drive: eyebrows up this long = start moving; down = stop
 const LOOK_ON = 0.45, LOOK_OFF = 0.25; // fraction of the way to the calibration spot
 const DEFAULT_GAZE = { center: 0, left: 0.25 };
 export const LONG_BLINK_MS = 500; // a deliberate long blink: used only as a quick stop while driving
@@ -57,6 +57,9 @@ export class GestureEngine {
     if (cal) this.p = { ...this.p, winkMinMs: DEFAULT_PARAMS.winkMinMs, bothMs: DEFAULT_PARAMS.bothMs, brow: { ...this.p.brow, ms: DEFAULT_PARAMS.brow.ms } };
   }
 
+  // call when the user is looking straight ahead (e.g. on opening Drive)
+  recentreGaze(t) { this.recentre = { t0: t, sum: 0, n: 0 }; this.look = 'center'; }
+
   reset() {
     this.closed = { L: false, R: false };
     this.mode = 'none';
@@ -64,7 +67,7 @@ export class GestureEngine {
     this.brow = null;            // {start, fired}
     this.wink = null;            // {side, start, holdFired, lastOk}
     this.candSide = null; this.candSince = 0;
-    this.gz = null; this.look = 'center'; this.lookLog = [];
+    this.gz = null; this.look = 'center'; this.lookLog = []; this.gOff = 0; this.recentre = null;
     this.pending = null;         // first blink of a possible double: {start, end}
     this.lastClosureEnd = -Infinity;
     this.lastT = null;
@@ -216,7 +219,12 @@ export class GestureEngine {
     // Not read while an eye is closing or the eyebrows are up, so the direction you chose stays put.
     if (typeof raw.gaze === 'number' && !this.brow && c.L < 0.4 && c.R < 0.4) {
       const G = this.cal.gaze?.ok ? this.cal.gaze : DEFAULT_GAZE;
-      const g = (raw.gaze - G.center) / (G.left - G.center); // +1 = looking at the left calibration spot
+      let g = (raw.gaze - G.center) / (G.left - G.center); // +1 = looking at the left calibration spot
+      // "straight ahead" is re-learned when Drive opens and then follows slow drift (a head that
+      // settles into a tilt), but only while you are looking ahead, never while you look to a side
+      if (this.recentre) { this.recentre.sum += g; this.recentre.n++; if (t - this.recentre.t0 > 1000) { this.gOff = this.recentre.sum / this.recentre.n; this.recentre = null; this.gz = null; } }
+      else if (this.look === 'center' && Math.abs(g - this.gOff) < LOOK_OFF) this.gOff += 0.004 * (g - this.gOff);
+      g -= this.gOff;
       this.gz = this.gz === null ? g : this.gz + 0.3 * (g - this.gz);
       const was = this.look;
       if (this.look === 'center') this.look = this.gz > LOOK_ON ? 'left' : this.gz < -LOOK_ON ? 'right' : 'center';
@@ -237,7 +245,8 @@ export class GestureEngine {
         if (!this.brow) this.brow = { start: t, fired: false };
         this.state.brow = Math.min(1, (t - this.brow.start) / p.brow.ms);
         if (!this.brow.fired && t - this.brow.start >= p.brow.ms) { this.brow.fired = true; ev.push({ type: 'BROW_HOLD', t }); }
-        if (this.lookNav && !this.brow.moving && t - this.brow.start >= BROW_MOVE_MS) {
+        if (n > BROW_MOVE_ON) this.brow.firm = (this.brow.firm || 0) + dt; // moving the robot takes a clear raise
+        if (this.lookNav && !this.brow.moving && this.brow.firm >= BROW_MOVE_MS) {
           this.brow.moving = true;
           const before = this.lookLog.filter((x) => x.t <= this.brow.start - 200).at(-1) || this.lookLog[0];
           if (before && before.look !== this.look) { this.look = before.look; this.gz = null; }

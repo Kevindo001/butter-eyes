@@ -204,12 +204,12 @@ try {
     await page.evaluate(() => { window.__butter.screens.home.i = 2; window.__butter.screens.home.render(); });
     await inject('DOUBLE_BLINK');
     assert(await screen() === 'settings', 'settings not open');
-    await inject('DOUBLE_BLINK'); // row 0: drive speed 10% -> 20%
-    await until(() => S('S.settings.driveSpeed === 0.2'), 3000, 'setting change');
-    assert(JSON.parse(fs.readFileSync(storePath, 'utf8')).settings.driveSpeed === 0.2, 'not persisted');
+    await inject('DOUBLE_BLINK'); // row 0: drive speed 5% -> 10%
+    await until(() => S('S.settings.driveSpeed === 0.1'), 3000, 'setting change');
+    assert(JSON.parse(fs.readFileSync(storePath, 'utf8')).settings.driveSpeed === 0.1, 'not persisted');
     assert((await page.content()).includes('Practice gestures'), 'no practice row');
     await shot('07-settings');
-    await page.evaluate(() => window.butterApi.saveSettings({ driveSpeed: 0.1 }).then((s) => { window.__butter.S.settings = s; }));
+    await page.evaluate(() => window.butterApi.saveSettings({ driveSpeed: 0.05 }).then((s) => { window.__butter.S.settings = s; }));
     await inject('BOTH_CLOSED');
   });
 
@@ -274,7 +274,7 @@ try {
     await page.press('#typeIn', 'Enter');
     await until(() => S("!screens.talk.loading && screens.talk.convo.at(-1).text === 'Are you hungry?' && screens.talk.options.length === 3"), 15000, 'options for typed');
     const opts = await S('screens.talk.options');
-    assert(opts.some((x) => /yes|yeah|sure|starving|bit|please/i.test(x)) && opts.some((x) => /\bno\b|not/i.test(x)), 'yes/no missing: ' + opts);
+    assert(opts.some((x) => /yes|yeah|yep|sure|starving|bit|please|i'm in/i.test(x)) && opts.some((x) => /\bno\b|not|nah/i.test(x)), 'yes/no missing: ' + opts);
     return JSON.stringify(opts);
   });
 

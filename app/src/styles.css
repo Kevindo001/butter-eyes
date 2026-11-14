@@ -238,11 +238,17 @@ canvas#snake { background: var(--linen); border-radius: var(--r); border: 3px so
 .practice .choice.seen { background: var(--go-soft); border-color: var(--go); }
 .practice .choice.seen .count { color: oklch(36% 0.1 152); }
 
-/* ---------- drive by looking: three targets across the bottom of the window */
-.looks { position: fixed; left: 0; right: 0; bottom: 26px; height: 120px; pointer-events: none; z-index: 5; }
-.looks > div { position: absolute; top: 0; width: 150px; height: 120px; display: grid; place-items: center; align-content: center; gap: 6px;
-  background: #fff; border: 3px solid var(--ink-3); color: var(--ink-2); font-weight: 800; font-size: 18px; }
-.looks > div svg { width: 40px; height: 40px; }
-.looks [data-l="left"] { left: 3%; } .looks [data-l="center"] { left: calc(50% - 75px); } .looks [data-l="right"] { right: 3%; }
-.looks > div.look { border-color: var(--lamp-deep); background: #fff3c4; color: var(--ink); }
-.looks > div.on { border-color: var(--go); background: var(--go-soft); color: var(--ink); }
+/* ---------- drive by looking: Butter's camera fills the screen, see-through targets on top of it */
+.drivescreen.wide { padding: 10px; }
+.drivescreen.wide .feed { position: relative; }
+.looks { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+.looks > div { position: absolute; width: 170px; height: 170px; display: grid; place-items: center; align-content: center; gap: 8px;
+  background: rgba(255, 255, 255, .28); border: 3px solid rgba(255, 255, 255, .7); color: #fff; font-weight: 800; font-size: 20px; text-shadow: 0 1px 3px rgba(0,0,0,.7); }
+.looks > div svg { width: 54px; height: 54px; }
+.looks [data-l="left"] { left: 2%; top: calc(50% - 85px); }
+.looks [data-l="center"] { left: calc(50% - 85px); top: 4%; }
+.looks [data-l="right"] { right: 2%; top: calc(50% - 85px); }
+.looks > div.look { background: rgba(255, 213, 74, .6); border-color: #ffd54a; }
+.looks > div.on { background: rgba(40, 170, 90, .75); border-color: #7dffb0; }
+.drivehint { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 16px; background: rgba(0, 0, 0, .55); color: #fff; font-size: 16px; text-align: center; z-index: 6; }
+.drivehint #ctlState { color: #ffd54a; font-weight: 800; margin-left: 10px; }

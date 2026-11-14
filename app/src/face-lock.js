@@ -12,10 +12,11 @@ export class FaceLock {
     this.pos = null;   // {cx, cy, size}
     this.lostAt = null;
     this.single = null; // {since} a single face present while searching (no signature case)
+    this.refSize = null; // typical size of the user's face in frame
   }
 
   setSignature(sig) { this.sig = sig; }
-  reset() { this.pos = null; this.lostAt = null; this.single = null; }
+  reset() { this.pos = null; this.lostAt = null; this.single = null; this.refSize = null; }
 
   sigDist(s) {
     if (!this.sig || !s) return null;
@@ -31,7 +32,23 @@ export class FaceLock {
     return i;
   }
 
-  update(faces, t) {
+  // In a crowd: people behind the user are much smaller in frame. Once we know how big the user's
+  // face is, anything clearly smaller is ignored completely (it can't take over, pause input, or
+  // even count as "multiple faces").
+  update(all, t) {
+    const ref = this.refSize;
+    const keep = all.map((f, i) => ({ f, i })).filter((x) => !ref || x.f.size >= 0.55 * ref);
+    const r = this._update(keep.map((x) => x.f), t);
+    if (r.index !== null) {
+      const f = keep[r.index].f;
+      this.refSize = ref ? ref + 0.02 * (f.size - ref) : f.size;
+      r.index = keep[r.index].i;
+    }
+    r.ignored = all.length - keep.length;
+    return r;
+  }
+
+  _update(faces, t) {
     const multiple = faces.length > 1;
     const res = (index, status) => ({ index, status, multiple });
     if (!faces.length) {
@@ -61,6 +78,11 @@ export class FaceLock {
     if (this.sig) {
       const scored = cands.map((x) => ({ ...x, s: this.sigDist(x.f.sig) })).sort((a, b) => a.s - b.s);
       if (scored.length === 1 || (scored.length > 1 && scored[1].s - scored[0].s > 1.5)) return res(this.take(scored[0].f, scored[0].i), 'locked');
+      // several look-alikes: the user is the one still sitting where the user was
+      if (this.pos && scored.length > 1) {
+        const byPos = scored.map((x) => ({ ...x, d: Math.hypot(x.f.cx - this.pos.cx, x.f.cy - this.pos.cy) / this.pos.size })).sort((a, b) => a.d - b.d);
+        if (byPos[0].d < 1 && byPos[1].d - byPos[0].d > 1) return res(this.take(byPos[0].f, byPos[0].i), 'locked');
+      }
       return res(null, scored.length ? 'ambiguous' : this.pos ? 'lost' : 'searching');
     }
     // no signature yet (before calibration): only lock when exactly one face is steadily present

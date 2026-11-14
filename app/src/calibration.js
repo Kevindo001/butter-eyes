@@ -230,7 +230,7 @@ export function fitCalibration(samples) {
 // Thresholds are standard values on the person's own open..closed scale. The practice screen then
 // shows which gestures actually register.
 // ============================================================================
-export const QUICK = { RELAXED_MS: 8000, CLOSED_MS: 3500 };
+export const QUICK = { RELAXED_MS: 8000, CLOSED_MS: 3500, BROW_MS: 2500 };
 
 export function quickCalibration(samples) {
   const report = { ok: false, notes: [], warnings: [] };
@@ -273,7 +273,14 @@ export function quickCalibration(samples) {
   const natP95 = Math.max(180, nat.length ? quantile(nat.map((x) => x.dur), 0.95) : 0);
   P.dbl.closeMinMs = clamp(natP95 + 25, 200, 300);
   const restB = relaxed.map((f) => f.raw.brow).filter((v) => typeof v === 'number');
-  const brow = restB.length > 20 ? { rest: median(restB), raised: median(restB) + 0.4 } : null;
+  let brow = restB.length > 20 ? { rest: median(restB), raised: median(restB) + 0.4 } : null;
+  // if the person did the eyebrow step, use how high THEIR eyebrows actually go
+  const upB = (samples.brow || []).filter((f) => f.face && typeof f.raw.brow === 'number').map((f) => f.raw.brow);
+  if (brow && upB.length > 10) {
+    const raised = quantile(upB, 0.75);
+    if (raised - brow.rest > 0.15) brow = { rest: brow.rest, raised, measured: true };
+    else report.notes.push('Raising your eyebrows barely showed up, so eyebrow control may be unreliable.');
+  }
   // sideways gaze: what the reading looks like when the circle sat at the left and right of the screen
   let gaze = null;
   const gAt = (pick) => relaxed.filter((f) => f.settled && typeof f.raw.gaze === 'number' && pick(f.x) && closure(f.raw, tf).L < 0.4 && closure(f.raw, tf).R < 0.4).map((f) => f.raw.gaze);

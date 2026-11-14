@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('butterApi', {
   suggest: (conversation) => ipcRenderer.invoke('llm:suggest', conversation),
   transcribe: (wavArrayBuffer) => ipcRenderer.invoke('speech:transcribe', wavArrayBuffer),
   speak: (text) => ipcRenderer.invoke('speech:speak', text),
+  clearTalk: () => ipcRenderer.invoke('store:clearTalk'),
   saveDebug: (name, data) => ipcRenderer.invoke('debug:save', name, data),
   drive: (dir) => ipcRenderer.invoke('butter:drive', dir),
   pulse: (dir, ms) => ipcRenderer.invoke('butter:pulse', dir, ms),
