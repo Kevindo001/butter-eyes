@@ -6,7 +6,7 @@
 // (0.5 s) is a quick stop.
 export const MAP = {
   home: {
-    WINK_LEFT: 'prev', WINK_RIGHT: 'next', DOUBLE_BLINK: 'open',
+    BROW_TAP: 'next', WINK_LEFT: 'prev', WINK_RIGHT: 'next', DOUBLE_BLINK: 'open',
   },
   talk: {
     BROW_TAP: 'cycle', BROW_SELECT: 'say',   // the simple way: quick eyebrow raise = next option, hold 1 s = say it
@@ -21,7 +21,7 @@ export const MAP = {
     HOLD_LEFT: 'spinRight', HOLD_RIGHT: 'spinLeft',     // turn for as long as the eye stays closed
   },
   snake: { WINK_LEFT: 'turnLeft', WINK_RIGHT: 'turnRight', DOUBLE_BLINK: 'pause' },
-  settings: { WINK_LEFT: 'prev', WINK_RIGHT: 'next', DOUBLE_BLINK: 'activate' },
+  settings: { BROW_TAP: 'next', WINK_LEFT: 'prev', WINK_RIGHT: 'next', DOUBLE_BLINK: 'activate' },
 };
 
 // What the on-screen hints call each gesture
@@ -30,12 +30,22 @@ export const NAMES = {
   HOLD_LEFT: 'hold left eye', HOLD_RIGHT: 'hold right eye', BOTH_CLOSED: 'close both eyes 3 s', BROW_HOLD: 'raise eyebrows 4 s',
 };
 
-export function actionFor(screen, type) { return MAP[screen]?.[type] ?? null; }
+// How the menus (Home, Settings, Talk) are navigated: 'brow' = quick eyebrow raise moves on and
+// winks do nothing; 'wink' = winks move and eyebrows do nothing (for people without eyebrow control).
+// Double blink selects either way. Drive and Snake have their own controls and are not affected.
+const MENUS = new Set(['home', 'settings', 'talk']);
+const BROW_NAV = new Set(['BROW_TAP', 'BROW_SELECT']), WINK_NAV = new Set(['WINK_LEFT', 'WINK_RIGHT']);
+let nav = 'brow';
+export function setNav(style) { nav = style === 'wink' ? 'wink' : 'brow'; }
+export const browMenus = (screen) => nav === 'brow' && MENUS.has(screen);
+const off = (screen, g) => MENUS.has(screen) && (nav === 'brow' ? WINK_NAV.has(g) : BROW_NAV.has(g));
+
+export function actionFor(screen, type) { return off(screen, type) ? null : MAP[screen]?.[type] ?? null; }
 
 // hint row for a screen: [gesture name, action label]
 export function hints(screen, labels, enabled = {}) {
   const rows = Object.entries(MAP[screen] || {})
-    .filter(([g]) => enabled[g] !== false)
+    .filter(([g]) => enabled[g] !== false && !off(screen, g))
     .map(([g, a]) => [NAMES[g], labels[a] || a]);
   rows.push([NAMES.BOTH_CLOSED, labels.back || 'back']);
   return rows;

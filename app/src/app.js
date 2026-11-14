@@ -7,7 +7,7 @@ import { MicListener } from './audio.js';
 import { centerOut } from '../lib/llm.js';
 import { Snake } from './snake.js';
 import { ICONS } from './icons.js';
-import { actionFor, hints } from './mapping.js';
+import { actionFor, hints, setNav, browMenus } from './mapping.js';
 
 const api = window.butterApi;
 const $ = (s, el = document) => el.querySelector(s);
@@ -113,8 +113,11 @@ function go(name, arg) {
   S.screenName = name;
   S.screen = screens[name];
   main.innerHTML = '';
+  syncNav();
   S.screen.enter?.(arg);
 }
+// menus are moved through by eyebrow raise or by winks (Settings > Navigate with)
+function syncNav() { setNav(S.settings?.navWith); if (S.engine) S.engine.browNav = browMenus(S.screenName); }
 const enabled = () => S.engine?.p?.enabled || {};
 const hintRow = (screen, labels) => `<div class="hint">${hints(screen, labels, enabled()).map(([g, a]) => `<span><kbd>${esc(g)}</kbd>${esc(a)}</span>`).join('')}</div>`;
 
@@ -136,7 +139,7 @@ screens.home = {
       <div class="cross">
         ${Object.entries(this.tiles).map(([d, t]) => `<div class="choice t-${d} ${focus === d ? 'focus' : ''}" data-dir="${d}">
           <div class="ico">${t.ico}</div>${t.name}<small>${t.sub}</small><span class="cue">Double blink to open</span></div>`).join('')}
-        <div class="center"><div class="eye"><div></div></div>Wink to move around,<br>double blink to open</div>
+        <div class="center"><div class="eye"><div></div></div>${browMenus("home") ? "Raise your eyebrows to move," : "Wink to move around,"}<br>double blink to open</div>
       </div>
       ${hintRow('home', { prev: 'previous', next: 'next', open: 'open', back: 'stop' })}
     </section>`;
@@ -266,8 +269,8 @@ const QUICK = [
 ];
 screens.talk = {
   convo: [], options: [], focus: 1, quick: false, qfocus: 0, reqId: 0, loading: false, info: '',
-  enter() { if (S.engine) S.engine.browNav = true; this.render(); this.startMic(); if (!this.options.length) this.refresh(); },
-  exit() { if (S.engine) S.engine.browNav = false; if (mic) mic.muted = true; },
+  enter() { this.render(); this.startMic(); if (!this.options.length) this.refresh(); },
+  exit() { if (mic) mic.muted = true; },
   async startMic() {
     if (mic) { mic.muted = false; return; }
     if (!S.store.keys.elevenlabs) { this.info = 'Speech-to-text off (no ElevenLabs key). Type below instead.'; this.paintBar(); return; }
@@ -401,6 +404,7 @@ screens.settings = {
     return [
       { k: 'driveSpeed', label: 'Drive speed', vals: [{ v: 0.05, l: '5%' }, { v: 0.1, l: '10%' }, { v: 0.2, l: '20%' }] },
       { k: 'driveMode', label: 'Drive with', vals: [{ v: 'look', l: 'Look + eyebrows' }, { v: 'blink', l: 'Blinks and winks' }] },
+      { k: 'navWith', label: 'Navigate with', vals: [{ v: 'brow', l: 'Eyebrows (quick raise = next)' }, { v: 'wink', l: 'Winks (left / right)' }] },
       { k: 'voiceOut', label: 'Voice comes out of', vals: [{ v: 'laptop', l: 'Laptop' }, { v: 'butter', l: 'Butter' }, { v: 'both', l: 'Both' }] },
       { k: 'recal', label: 'Recalibrate eyes', action: () => go('calibrate') },
       { k: 'practice', label: 'Practice gestures', action: () => go('practice') },
@@ -422,7 +426,7 @@ screens.settings = {
       ${r.text ? `<input data-k="${r.k}" value="${esc(r.cur)}" placeholder="${esc(r.ph || '')}" />` : ''}
       ${r.area ? `<textarea data-k="${r.k}" placeholder="${esc(r.ph || '')}">${esc(r.cur)}</textarea>` : ''}
       </div></div>`).join('')}
-      </div>${hintRow('settings', { prev: 'up', next: 'down', activate: 'change / do it', back: 'home' })}</section>`;
+      </div>${hintRow('settings', { prev: 'up', next: 'next row', activate: 'change / do it', back: 'home' })}</section>`;
     main.querySelectorAll('[data-k]').forEach((el) => el.addEventListener('change', () => save({ [el.dataset.k]: el.value.trim() })));
     main.querySelectorAll('.srow[data-i]').forEach((el) => el.querySelectorAll('[data-v]').forEach((sp) => sp.addEventListener('click', () => {
       const r = rows[+el.dataset.i]; save({ [r.k]: r.vals.find((x) => String(x.v) === sp.dataset.v).v }).then(() => this.render());
@@ -443,7 +447,7 @@ screens.settings = {
   },
 };
 
-async function save(patch) { S.settings = await api.saveSettings(patch); }
+async function save(patch) { S.settings = await api.saveSettings(patch); syncNav(); }
 
 // ---------------------------------------------------------------- calibration (about 20 s, spoken)
 const SPEED = api.calSpeed || 1; // e2e runs it faster
@@ -608,7 +612,7 @@ function chime() {
 // ============================================================ tracking + HUD
 function startEngine(cal) {
   S.engine = new GestureEngine(cal);
-  S.engine.browNav = S.screenName === 'talk';
+  syncNav();
   S.engine.lookNav = S.screenName === 'drive' && lookDrive();
   if (cal.signature) S.tracker?.lock.setSignature(cal.signature);
 }

@@ -23,6 +23,7 @@ const DEFAULT_SETTINGS = {
   butterUrl: process.env.BUTTER_URL || 'ws://100.127.78.50:8770',
   butterCameraUrl: process.env.BUTTER_CAMERA_URL || 'http://100.127.78.50:5600/',
   voiceOut: 'laptop',       // laptop | butter | both
+  navWith: 'brow',          // menus: brow = quick eyebrow raise moves on | wink = winks move
   driveMode: 'look',        // look = eyes pick direction, eyebrows move | blink = double blink / winks
   driveSpeed: 0.05,         // motor power 0.05-1.0 (0.05 = crawl)
   voiceId: '',

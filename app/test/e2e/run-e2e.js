@@ -55,7 +55,7 @@ const storePath = path.join(os.tmpdir(), `butter-e2e-${process.pid}.json`);
 const { cal, report } = fitCalibration(simCalibrationSamples(makeSim({ seed: 3 })));
 cal.report = { gestures: report.gestures };
 const seed = () => fs.writeFileSync(storePath, JSON.stringify({
-  settings: { butterUrl: `ws://127.0.0.1:${PORT}`, butterCameraUrl: 'http://127.0.0.1:1/none', voiceOut: 'laptop', driveMode: 'blink' },
+  settings: { butterUrl: `ws://127.0.0.1:${PORT}`, butterCameraUrl: 'http://127.0.0.1:1/none', voiceOut: 'laptop', driveMode: 'blink', navWith: 'wink' },
   calibration: cal, voiceExamples: [],
 }));
 seed();
@@ -214,6 +214,32 @@ try {
   });
 
   let heardAt;
+  await check('menus by eyebrows (Settings > Navigate with): quick raise moves on and wraps, winks do nothing, double blink opens; wink style restores winks', async () => {
+    const setNav = (v) => page.evaluate((v) => window.butterApi.saveSettings({ navWith: v }).then((s) => { window.__butter.S.settings = s; window.__butter.go('home'); }), v);
+    await setNav('brow');
+    const i0 = await S('screens.home.i');
+    await inject('WINK_RIGHT'); await inject('WINK_LEFT');
+    assert(await S('screens.home.i') === i0, 'a wink moved the menu in eyebrow style');
+    const seen = [];
+    for (let k = 0; k < 4; k++) { await inject('BROW_TAP'); seen.push(await S('screens.home.i')); }
+    assert(seen[3] === i0 && new Set(seen).size === 4, 'eyebrow cycle wrong: ' + seen);
+    const hint = await page.locator('.hint').textContent();
+    assert(/eyebrow/i.test(hint) && !/wink/i.test(hint), 'hints not updated: ' + hint);
+    await shot('02b-home-eyebrows');
+    await page.evaluate(() => { window.__butter.screens.home.i = 2; window.__butter.screens.home.render(); });
+    await inject('DOUBLE_BLINK');
+    assert(await screen() === 'settings', 'double blink did not open');
+    const r0 = await S('screens.settings.row');
+    await inject('WINK_RIGHT'); assert(await S('screens.settings.row') === r0, 'wink moved a settings row');
+    await inject('BROW_TAP'); assert(await S('screens.settings.row') === r0 + 1, 'eyebrow did not move a settings row');
+    await setNav('wink');
+    await inject('BROW_TAP'); assert(await S('screens.home.i') === (await S('screens.home.i')), 'noop');
+    const i1 = await S('screens.home.i');
+    await inject('BROW_TAP'); assert(await S('screens.home.i') === i1, 'eyebrow moved the menu in wink style');
+    await inject('WINK_RIGHT'); assert(await S('screens.home.i') !== i1, 'wink did not move the menu in wink style');
+    await page.evaluate(() => window.__butter.go('home'));
+  });
+
   await check('drive (look + eyebrows): look left + eyebrows up turns left, eyebrows down stops, forward when looking ahead; 4 s eyebrows does not switch control off', async () => {
     await page.evaluate(() => window.butterApi.saveSettings({ driveMode: 'look' }).then((s) => { window.__butter.S.settings = s; window.__butter.go('drive'); }));
     assert(await page.locator('#looks [data-l]').count() === 3, 'look targets missing');
@@ -290,6 +316,7 @@ try {
   });
 
   await check('talk: eyebrow raise cycles the 3 options (wraps), eyebrow hold says the focused one', async () => {
+    await page.evaluate(() => window.butterApi.saveSettings({ navWith: 'brow' }).then((s) => { window.__butter.S.settings = s; window.__butter.go('talk'); }));
     await until(() => S('!screens.talk.loading && screens.talk.options.length === 3'), 15000, 'replies');
     const f0 = await S('screens.talk.focus');
     const seen = [];
@@ -299,6 +326,7 @@ try {
     const want = await S('screens.talk.options[screens.talk.focus]');
     await inject('BROW_SELECT');
     await until(() => S(`screens.talk.convo.some(m => m.who === 'me' && m.text === ${JSON.stringify(want)})`), 5000, 'said by eyebrow hold');
+    await page.evaluate(() => window.butterApi.saveSettings({ navWith: 'wink' }).then((s) => { window.__butter.S.settings = s; window.__butter.go('talk'); }));
     return want;
   });
 
