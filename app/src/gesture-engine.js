@@ -104,7 +104,13 @@ export class GestureEngine {
     let c = closure(raw, this.cal.tf, parts);
     if (this.cal.swapSides) c = { L: c.R, R: c.L };
     this.state.c = c;
-    for (const e of ['L', 'R']) this.closed[e] = this.closed[e] ? c[e] > p.openT[e] : c[e] > p.closeT[e];
+    // during a wink the open eye often droops part-way; it only counts as closed again relative to
+    // where it sat when the wink began (so its natural blinks are still seen, but the droop isn't)
+    const dyn = this.wink?.otherOpenT;
+    for (const e of ['L', 'R']) {
+      const openT = dyn && dyn.eye === e ? dyn.t : p.openT[e];
+      this.closed[e] = this.closed[e] ? c[e] > openT : c[e] > p.closeT[e];
+    }
 
     // ---------- both eyes closed
     if (this.closed.L && this.closed.R) {
@@ -188,7 +194,9 @@ export class GestureEngine {
         }
       }
       if (!this.wink && cand) {
-        this.wink = { side: cand, start: t, holdFired: false, lastOk: t, real: false, clean: 0 };
+        const o = cand === 'left' ? 'R' : 'L';
+        this.wink = { side: cand, start: t, holdFired: false, lastOk: t, real: false, clean: 0,
+          otherOpenT: { eye: o, t: Math.min(p.closeT[o] - 0.05, Math.max(p.openT[o], c[o] + 0.12)) } };
       }
     }
     this.state.eyes = this.both ? 'closed' : this.wink ? `wink-${this.wink.side}` : (this.closed.L || this.closed.R) ? 'closing' : 'open';

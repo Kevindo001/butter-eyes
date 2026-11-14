@@ -2,7 +2,7 @@
 // What each gesture does lives in mapping.js (provisional, one table).
 import { FaceTracker } from './face-tracker.js';
 import { GestureEngine } from './gesture-engine.js';
-import { fitCalibration, ENROLL, REPS, RELAXED_MS, CLOSED_MS, CLOSED_CHIME_MS } from './calibration.js';
+import { quickCalibration, QUICK as QCAL } from './calibration.js';
 import { MicListener } from './audio.js';
 import { centerOut } from '../lib/llm.js';
 import { Snake } from './snake.js';
@@ -24,7 +24,7 @@ const S = {
   control: true, // eye control on/off (eyebrow hold toggles it); off = blink freely, nothing fires
 };
 let mic = null;
-window.__butter = { S, mic: () => mic, screens: null, inject: (type, extra = {}) => dispatch({ type, t: performance.now(), src: 'test', ...extra }) };
+window.__butter = { S, mic: () => mic, screens: null, go: (n) => go(n), inject: (type, extra = {}) => dispatch({ type, t: performance.now(), src: 'test', ...extra }) };
 
 function toast(msg, ms = 2400) {
   const t = $('#toast');
@@ -39,7 +39,7 @@ const LABEL = { BROW_HOLD: 'Eyebrows', DOUBLE_BLINK: 'Double blink', WINK_LEFT: 
 // ============================================================ input bus
 function dispatch(ev) {
   if (S.calibrating && ev.src !== 'test') return;
-  if (ev.type === 'BROW_HOLD') { setControl(!S.control); pulse(); return; }
+  if (ev.type === 'BROW_HOLD' && S.screenName !== 'practice') { setControl(!S.control); pulse(); return; }
   // eye control off: nothing fires except the safety stop and status events
   if (!S.control && ev.src !== 'key' && !['BOTH_CLOSED', 'LONG_BLINK', 'FACE_LOST', 'FACE_FOUND', 'CALIBRATION_DRIFT'].includes(ev.type)) return;
   S.log.push({ type: ev.type, t: Math.round(ev.t), screen: S.screenName });
@@ -47,7 +47,7 @@ function dispatch(ev) {
   if (LABEL[ev.type]) { pulse(); const g = $('#lastGesture'); if (g) { g.textContent = LABEL[ev.type]; g.classList.remove('show'); void g.offsetWidth; g.classList.add('show'); } }
   if (ev.type === 'CALIBRATION_DRIFT') { S.status.drift = true; paintPills(); toast('Your eyes look different from calibration (glasses on or off?). Recalibrate in Settings.', 5000); return; }
   if (S.screen?.on?.(ev)) return;
-  if (ev.type === 'BOTH_CLOSED' && !['home', 'calibrate'].includes(S.screenName)) go('home');
+  if (ev.type === 'BOTH_CLOSED' && !['home', 'calibrate', 'practice'].includes(S.screenName)) go('home');
 }
 
 function setControl(on) {
@@ -338,6 +338,7 @@ screens.settings = {
       { k: 'driveSpeed', label: 'Drive speed', vals: [{ v: 0.25, l: 'Slow' }, { v: 0.35, l: 'Medium' }, { v: 0.5, l: 'Fast' }] },
       { k: 'voiceOut', label: 'Voice comes out of', vals: [{ v: 'laptop', l: 'Laptop' }, { v: 'butter', l: 'Butter' }, { v: 'both', l: 'Both' }] },
       { k: 'recal', label: 'Recalibrate eyes', action: () => go('calibrate') },
+      { k: 'practice', label: 'Practice gestures', action: () => go('practice') },
       { k: 'back', label: 'Back to home', action: () => go('home') },
       { k: 'butterUrl', label: 'Butter address', text: true },
       { k: 'butterCameraUrl', label: 'Butter camera URL', text: true },
@@ -348,7 +349,6 @@ screens.settings = {
   enter() { this.row = 0; this.render(); },
   render() {
     const rows = this.rows();
-    const card = S.store.calibration?.report;
     main.innerHTML = `<section class="screen"><h1>Settings</h1><div class="settings">${rows.map((r, i) => `
       <div class="srow ${i === this.row ? 'focus' : ''}" data-i="${i}"><div>${r.label}</div><div>
       ${r.vals ? `<div class="vals">${r.vals.map((v) => `<span class="${v.v === r.cur ? 'sel' : ''}" data-v="${v.v}">${v.l}</span>`).join('')}</div>` : ''}
@@ -356,7 +356,6 @@ screens.settings = {
       ${r.text ? `<input data-k="${r.k}" value="${esc(r.cur)}" placeholder="${esc(r.ph || '')}" />` : ''}
       ${r.area ? `<textarea data-k="${r.k}" placeholder="${esc(r.ph || '')}">${esc(r.cur)}</textarea>` : ''}
       </div></div>`).join('')}
-      ${card ? `<div class="srow"><div>Gestures you can use</div><div class="vals">${Object.values(card.gestures).map((g) => `<span class="${g.reliable ? 'sel' : ''}">${esc(g.label)}</span>`).join('')}</div></div>` : ''}
       </div>${hintRow('settings', { prev: 'up', next: 'down', activate: 'change / do it', back: 'home' })}</section>`;
     main.querySelectorAll('[data-k]').forEach((el) => el.addEventListener('change', () => save({ [el.dataset.k]: el.value.trim() })));
     main.querySelectorAll('.srow[data-i]').forEach((el) => el.querySelectorAll('[data-v]').forEach((sp) => sp.addEventListener('click', () => {
@@ -380,24 +379,37 @@ screens.settings = {
 
 async function save(patch) { S.settings = await api.saveSettings(patch); }
 
-// ---------------------------------------------------------------- calibration
+// ---------------------------------------------------------------- calibration (about 20 s, spoken)
 const SPEED = api.calSpeed || 1; // e2e runs it faster
+// say it out loud, so nobody has to read (or open their eyes) to know what to do
+function speak(text) {
+  return new Promise((res) => {
+    if (SPEED < 1 || !window.speechSynthesis) return setTimeout(res, 300 * SPEED);
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.05; u.onend = res; u.onerror = res;
+    speechSynthesis.cancel(); speechSynthesis.speak(u);
+    setTimeout(res, 6000);
+  });
+}
+function beep(freq = 880, ms = 250) {
+  try {
+    const c = new AudioContext(), o = c.createOscillator(), g = c.createGain();
+    o.frequency.value = freq; g.gain.setValueAtTime(0.2, c.currentTime); g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + ms / 1000);
+    o.connect(g).connect(c.destination); o.start(); o.stop(c.currentTime + ms / 1000);
+  } catch {}
+}
 screens.calibrate = {
   enter() {
-    this.cancelled = false; this.report = null;
+    this.cancelled = false;
     S.calibrating = true;
     main.innerHTML = `<div class="calib">
-      <div class="calstep" id="calstep"></div>
-      <div class="label" id="lbl">Getting ready</div><div class="sub" id="sub"></div>
       <div class="target" id="tgt"><div></div></div>
-      <div class="bar"><div id="bar"></div></div></div>`;
-    this.run().catch((e) => { console.error(e); $('#lbl').textContent = 'Calibration error'; $('#sub').textContent = String(e.message || e); S.calibrating = false; });
+      <div class="label" id="lbl">Getting ready</div><div class="sub" id="sub"></div>
+    </div>`;
+    this.run().catch((e) => { console.error(e); this.set('Calibration error', String(e.message || e)); S.calibrating = false; });
   },
-  exit() { this.cancelled = true; S.calibrating = false; },
-  on(ev) {
-    if (this.report && (ev.type === 'DOUBLE_BLINK' || ev.type === 'BOTH_CLOSED')) { go('home'); return true; }
-    return true;
-  },
+  exit() { this.cancelled = true; S.calibrating = false; window.speechSynthesis?.cancel(); },
+  on() { return true; },
   collect(ms, into) {
     return new Promise((res) => {
       const off = S.tracker.onFrame((f, t) => {
@@ -407,19 +419,20 @@ screens.calibrate = {
       setTimeout(() => { off(); res(into); }, ms * SPEED);
     });
   },
-  set(step, label, sub = '') { $('#calstep').textContent = step; $('#lbl').textContent = label; $('#sub').textContent = sub; },
-  // the circle: where to look, and a ring that fills while it's your turn
+  // instruction text sits right under the circle: one place to look
+  set(label, sub = '') { const l = $('#lbl'); if (l) { l.textContent = label; $('#sub').textContent = sub; } },
   circle(x, y, ringMs = 0) {
     const t = $('#tgt'); if (!t) return;
     t.style.left = x + '%'; t.style.top = y + '%';
+    const c = main.querySelector('.calib'); c.style.setProperty('--tx', x + '%'); c.style.setProperty('--ty', y + '%');
     t.classList.remove('fill'); void t.offsetWidth;
     if (ringMs) { t.style.setProperty('--ring-ms', ringMs * SPEED + 'ms'); t.classList.add('fill'); }
   },
   async run() {
-    if (!S.tracker) { this.set('', 'Camera not available', S.trackerError || ''); return; }
-    // ---- setup: one face, close enough, no glare (a few seconds at most)
+    if (!S.tracker) { this.set('Camera not available', S.trackerError || ''); return; }
     S.tracker.lock.reset(); S.tracker.lock.setSignature(null);
-    this.circle(50, 58);
+    this.circle(50, 42);
+    // ---- setup: one face, close enough, no glare
     let good = 0;
     const t0 = performance.now();
     await new Promise((res) => {
@@ -427,74 +440,92 @@ screens.calibrate = {
         const issue = !f.face ? (f.multiple ? 'Only one person in view, please' : 'Sit in front of the camera')
           : f.eyePx < 22 ? 'Move a little closer to the screen'
           : f.glare > 0.06 ? 'Light is reflecting off your glasses: tilt the screen down a little' : '';
-        this.set('One minute', issue || 'Look at the circle', '');
+        this.set(issue || 'Ready?', issue ? '' : 'Calibration takes about 20 seconds');
         good = issue ? 0 : good + 1;
         if (good > 15 || this.cancelled || (performance.now() - t0 > 20000 * SPEED && f.face)) { off(); res(); }
       });
     });
     if (this.cancelled) return;
-    const samples = { relaxed: [], closed: [], reps: {}, sig: [] };
+    const samples = { relaxed: [], closed: [], sig: [] };
     this.sigs = samples.sig;
-    const total = RELAXED_MS + CLOSED_MS + 900 + ENROLL.reduce((a, e) => a + 1200 + REPS * (e.windowMs + 500), 0);
-    const tStart = performance.now();
-    const tick = setInterval(() => { const b = $('#bar'); if (b) b.style.width = Math.min(100, (100 * (performance.now() - tStart)) / (total * SPEED)) + '%'; }, 200);
 
-    try {
-      // ---- 1. relaxed: follow the circle, blink normally
-      this.set('1 of 3', 'Follow the circle', 'Blink normally. Just relax.');
-      const spots = [[50, 58], [20, 40], [80, 40], [80, 78], [20, 78], [50, 58]];
-      const hop = RELAXED_MS / spots.length;
-      const relaxed = this.collect(RELAXED_MS, samples.relaxed);
-      for (const [x, y] of spots) { this.circle(x, y); await sleep(hop * SPEED); if (this.cancelled) return; }
-      await relaxed;
+    // ---- 1. relaxed: follow the circle
+    this.set('Follow the circle', 'Blink normally');
+    await speak('Follow the circle with your eyes. Blink normally.');
+    if (this.cancelled) return;
+    beep(660, 150);
+    const spots = [[50, 42], [22, 30], [78, 30], [78, 60], [22, 60], [50, 42]];
+    const relaxed = this.collect(QCAL.RELAXED_MS, samples.relaxed);
+    for (const [x, y] of spots) { this.circle(x, y); await sleep((QCAL.RELAXED_MS / spots.length) * SPEED); if (this.cancelled) return; }
+    await relaxed;
 
-      // ---- 2. closed
-      this.circle(50, 58, CLOSED_CHIME_MS);
-      this.set('2 of 3', 'Close both eyes', 'Keep them closed until the chime');
-      setTimeout(() => chime(), CLOSED_CHIME_MS * SPEED);
-      await this.collect(CLOSED_MS, samples.closed);
-      this.set('2 of 3', 'Open your eyes', '');
-      await sleep(900 * SPEED);
+    // ---- 2. closed: voice in, beep out (no reading with your eyes shut)
+    this.set('Close both eyes', 'Keep them closed until the beep');
+    await speak('Now close both eyes, and keep them closed until you hear the beep.');
+    if (this.cancelled) return;
+    this.circle(50, 42, QCAL.CLOSED_MS);
+    await this.collect(QCAL.CLOSED_MS, samples.closed);
+    beep(880, 500);
+    this.set('Open your eyes', '');
+    await sleep(700 * SPEED);
 
-      // ---- 3. each gesture twice, on the ring
-      for (const [gi, step] of ENROLL.entries()) {
-        samples.reps[step.g] = [];
-        this.circle(50, 58);
-        this.set(`3 of 3 · ${gi + 1}/${ENROLL.length}`, step.label, step.cue);
-        await sleep(1200 * SPEED);
-        for (let r = 0; r < REPS; r++) {
-          if (this.cancelled) return;
-          this.set(`3 of 3 · ${gi + 1}/${ENROLL.length}`, r ? 'Once more' : 'Now', step.cue);
-          this.circle(50, 58, step.chimeMs || step.windowMs);
-          if (step.chimeMs) setTimeout(() => chime(), step.chimeMs * SPEED);
-          samples.reps[step.g].push(await this.collect(step.windowMs, []));
-          this.circle(50, 58);
-          this.set(`3 of 3 · ${gi + 1}/${ENROLL.length}`, 'Relax', '');
-          await sleep(500 * SPEED);
-        }
-      }
-    } finally { clearInterval(tick); }
-
-    // ---- fit + report card
-    const { cal, report } = fitCalibration(samples);
-    this.report = report;
-    if (cal) {
-      cal.report = { gestures: report.gestures };
-      await api.saveCalibration(cal);
-      S.store.calibration = cal;
-      startEngine(cal);
-      S.status.drift = false; paintPills();
-    }
+    const { cal, report } = quickCalibration(samples);
+    api.saveDebug('calibration', { report, samples: { relaxed: samples.relaxed, closed: samples.closed } });
     S.calibrating = false;
-    main.innerHTML = `<section class="screen"><div class="report">
-      <h1>${cal ? 'Your eye gestures' : 'Calibration didn\'t work'}</h1>
-      ${Object.values(report.gestures).map((g) => `<div class="row"><span>${esc(g.label)}</span><b class="${g.reliable ? 'ok' : 'off'}">${g.reliable ? 'Works' : 'Off'}${g.reason ? ` · ${esc(g.reason)}` : ''}</b></div>`).join('')}
-      ${report.notes.map((w) => `<p class="note">${esc(w)}</p>`).join('')}
-      ${report.warnings.map((w) => `<p class="warn">${esc(w)}</p>`).join('')}
-      <p>${cal ? 'Double blink, or wait, to continue.' : 'Press C to try again.'}</p></div></section>`;
-    if (cal) setTimeout(() => { if (S.screenName === 'calibrate' && this.report === report) go('home'); }, 10000);
+    if (!cal) {
+      this.circle(50, 42);
+      this.set('Let\'s try that again', report.warnings[0] || '');
+      speak(report.warnings[0] || 'That did not work. Let us try again.');
+      $('#sub').insertAdjacentHTML('afterend', '<div class="again">Press C to retry</div>');
+      return;
+    }
+    await api.saveCalibration(cal);
+    S.store.calibration = cal;
+    startEngine(cal);
+    S.status.drift = false; paintPills();
+    go('practice');
   },
 };
+
+// ---------------------------------------------------------------- practice: try each gesture, see it register
+const PRACTICE = [
+  { g: 'DOUBLE_BLINK', label: 'Slow double blink', how: 'Two slow, firm blinks' },
+  { g: 'WINK_LEFT', label: 'Wink left', how: 'Close only your left eye, briefly' },
+  { g: 'WINK_RIGHT', label: 'Wink right', how: 'Close only your right eye, briefly' },
+  { g: 'HOLD_LEFT', label: 'Hold left', how: 'Keep your left eye closed 1 second' },
+  { g: 'HOLD_RIGHT', label: 'Hold right', how: 'Keep your right eye closed 1 second' },
+  { g: 'BROW_HOLD', label: 'Eyebrows', how: 'Raise your eyebrows 2 seconds' },
+  { g: 'BOTH_CLOSED', label: 'Both eyes closed', how: 'Close both eyes 2 seconds' },
+];
+screens.practice = {
+  enter() {
+    this.counts = {}; this.frames = []; this.events = []; this.t0 = performance.now();
+    this.off = S.tracker?.onFrame((f, t) => { if (this.frames.length < 2400) this.frames.push(f.face ? { t, face: true, raw: f.raw } : { t, face: false }); });
+    this.render();
+    speak('Now try each gesture. It lights up when I see it.');
+  },
+  exit() { this.off?.(); api.saveDebug('practice', { counts: this.counts, events: this.events, frames: this.frames }); },
+  render() {
+    main.innerHTML = `<section class="screen">
+      <div><h1>Try each gesture</h1><h2>Each one lights up when Butter sees it. Press Enter when you're done.</h2></div>
+      <div class="practice">${PRACTICE.map((p) => `<div class="choice ${this.counts[p.g] ? 'seen' : ''}" data-g="${p.g}">
+        <b>${p.label}</b><small>${p.how}</small><span class="count">${this.counts[p.g] ? 'Seen ' + this.counts[p.g] + 'x' : 'Not yet'}</span></div>`).join('')}
+      </div>
+      <div class="hint"><span><kbd>Enter</kbd>finish</span><span><kbd>C</kbd>recalibrate</span><span>Gestures that never light up: tell Claude which ones</span></div>
+    </section>`;
+  },
+  on(ev) {
+    this.events.push({ type: ev.type, t: Math.round(ev.t - this.t0), src: ev.src });
+    if (PRACTICE.some((p) => p.g === ev.type)) {
+      this.counts[ev.type] = (this.counts[ev.type] || 0) + 1;
+      beep(ev.type === 'BOTH_CLOSED' ? 520 : 990, 120);
+      this.render();
+      const el = main.querySelector(`[data-g="${ev.type}"]`); el?.classList.add('focus'); setTimeout(() => el?.classList.remove('focus'), 600);
+    }
+    return true;
+  },
+};
+addEventListener('keydown', (e) => { if (e.key === 'Enter' && S.screenName === 'practice') go('home'); });
 
 function chime() {
   try {
@@ -520,7 +551,22 @@ function paintPills() {
   set('pillControl', !S.control);
 }
 
+// the thumbnail shows only the locked face, zoomed in
+function paintFace(frame) {
+  const cv = $('#camOverlay'), v = $('#video');
+  if (!cv || !v.videoWidth) return;
+  if (cv.width !== 216) { cv.width = 216; cv.height = 120; }
+  const ctx = cv.getContext('2d');
+  if (!frame.face || !frame.landmarks) { ctx.fillStyle = '#2a2420'; ctx.fillRect(0, 0, cv.width, cv.height); return; }
+  let x0 = 1, y0 = 1, x1 = 0, y1 = 0;
+  for (const p of frame.landmarks) { if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x; if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y; }
+  const cx = ((x0 + x1) / 2) * v.videoWidth, cy = ((y0 + y1) / 2) * v.videoHeight;
+  const h = (y1 - y0) * v.videoHeight * 1.25, w = h * (cv.width / cv.height);
+  ctx.drawImage(v, cx - w / 2, cy - h / 2, w, h, 0, 0, cv.width, cv.height);
+}
+
 function paintHud(frame) {
+  paintFace(frame);
   if (paintHud.face !== !!frame.face) { paintHud.face = !!frame.face; $('#pillFace').classList.toggle('on', paintHud.face); $('#pillFace b').textContent = paintHud.face ? 'Face found' : 'No face'; }
   const st = S.status;
   const ch = st.multiple !== frame.multiple || st.lock !== frame.lock || st.close !== (frame.face && frame.eyePx < 22) || st.glare !== (frame.face && frame.glare > 0.06);

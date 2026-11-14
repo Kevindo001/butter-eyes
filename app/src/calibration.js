@@ -221,3 +221,67 @@ export function fitCalibration(samples) {
   report.usable = usable;
   return { cal: report.ok ? cal : null, report };
 }
+
+
+// ============================================================================
+// Quick calibration (what the app uses): ~20 s, no per-gesture enrollment.
+//   relaxed: follow the circle, blink normally      -> open-eye baseline, natural blink length, brow rest
+//   closed:  close both eyes until the beep         -> fully-closed reference
+// Thresholds are standard values on the person's own open..closed scale. The practice screen then
+// shows which gestures actually register.
+// ============================================================================
+export const QUICK = { RELAXED_MS: 8000, CLOSED_MS: 3500 };
+
+export function quickCalibration(samples) {
+  const report = { ok: false, notes: [], warnings: [] };
+  const relaxed = (samples.relaxed || []).filter((f) => f.face);
+  const closedAll = (samples.closed || []).filter((f) => f.face);
+  if (relaxed.length < 40 || closedAll.length < 15) {
+    report.warnings.push('Your face was not visible for most of the calibration. Check lighting and sit in front of the camera.');
+    return { cal: null, report };
+  }
+  // open frames: relaxed, away from natural blinks
+  const bAvg = (f) => (f.raw.b.L + f.raw.b.R) / 2;
+  const bMid = median(relaxed.map(bAvg));
+  const blinkish = relaxed.map((f) => bAvg(f) > bMid + 0.2);
+  const openRows = relaxed.filter((_, i) => !blinkish.slice(Math.max(0, i - 4), i + 5).some(Boolean)).map((f) => f.raw);
+  // closed frames: whenever in the window the eyes really were closed (no assumption about reaction time)
+  const lo = quantile(closedAll.map(bAvg), 0.1), hi = quantile(closedAll.map(bAvg), 0.9);
+  const rOpen = median(relaxed.map((f) => (f.raw.r.L + f.raw.r.R) / 2));
+  const rMin = quantile(closedAll.map((f) => (f.raw.r.L + f.raw.r.R) / 2), 0.1);
+  const byBlink = hi - bMid > 0.15, byLid = rOpen - rMin > 0.25 * rOpen;
+  if (!byBlink && !byLid) {
+    report.warnings.push('We did not see your eyes close. Close them fully when you hear "close both eyes", and keep them closed until the beep.');
+    return { cal: null, report };
+  }
+  const isClosed = (f) => (byBlink ? bAvg(f) > (bMid + hi) / 2 : (f.raw.r.L + f.raw.r.R) / 2 < (rOpen + rMin) / 2);
+  const closedFrames = closedAll.filter(isClosed);
+  const closedMs = closedFrames.length ? closedFrames.at(-1).t - closedFrames[0].t : 0;
+  if (closedFrames.length < 10 || closedMs < 700) {
+    report.warnings.push('Your eyes were closed too briefly. Keep them closed until the beep.');
+    return { cal: null, report };
+  }
+  const { tf, notes } = fitTransform(openRows.length > 20 ? openRows : relaxed.map((f) => f.raw), closedFrames.map((f) => f.raw));
+  report.notes.push(...notes);
+
+  const P = structuredClone(DEFAULT_PARAMS);
+  P.otherMax = { left: 0.42, right: 0.42 };
+  P.asymMin = 0.35;
+  // natural blink length -> how slow a "slow double blink" must be
+  const ser = relaxed.map((f) => { const c = closure(f.raw, tf); return { t: f.t, cL: c.L, cR: c.R }; });
+  const nat = closureIntervals(ser, (x) => Math.min(x.cL, x.cR), 0.55, 0.3);
+  const natP95 = Math.max(180, nat.length ? quantile(nat.map((x) => x.dur), 0.95) : 0);
+  P.dbl.closeMinMs = clamp(natP95 + 50, 230, 330);
+  const restB = relaxed.map((f) => f.raw.brow).filter((v) => typeof v === 'number');
+  const brow = restB.length > 20 ? { rest: median(restB), raised: median(restB) + 0.4 } : null;
+  const cal = { version: 3, quick: true, createdAt: Date.now(), tf, swapB: false, swapSides: false, brow, params: P };
+  if (samples.sig?.length) {
+    const dims = samples.sig[0].length;
+    const m = Array.from({ length: dims }, (_, i) => median(samples.sig.map((x) => x[i])));
+    const sd = Array.from({ length: dims }, (_, i) => 1.4826 * median(samples.sig.map((x) => Math.abs(x[i] - m[i]))) + 0.01);
+    cal.signature = { mean: m, sd };
+  }
+  report.ok = true;
+  report.stats = { openB: bMid, closedB: hi, lidOpen: rOpen, lidClosed: rMin, naturalBlinks: nat.length, slowBlinkMinMs: Math.round(P.dbl.closeMinMs), closedMs: Math.round(closedMs) };
+  return { cal, report };
+}

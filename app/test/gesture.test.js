@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { GestureEngine } from '../src/gesture-engine.js';
-import { fitCalibration } from '../src/calibration.js';
+import { fitCalibration, quickCalibration } from '../src/calibration.js';
 import { FaceLock } from '../src/face-lock.js';
 import { makeSim, simCalibrationSamples, PERSONAS, G } from './sim.js';
 
@@ -218,4 +218,49 @@ test('a quick natural eyebrow raise (under 1 s) does not toggle; a 1.5 s hold do
   sim.setNatural(false);
   assert.deepEqual(types(feed([...sim.run([[700, { brow: 1 }]]), ...sim.run([[800, {}]])])), []);
   assert.deepEqual(types(feed([...sim.run([[3500, { brow: 1 }]]), ...sim.run([[800, {}]])])), ['BROW_HOLD']);
+});
+
+// ------------------------------------------------------------------ quick calibration (what the app uses)
+function quickSetup(persona, seed, { reactMs = 350 } = {}) {
+  const sim = makeSim({ seed, persona });
+  const fr = (a) => a.map((x) => ({ t: x.t, ...x.f }));
+  sim.run([[800, {}]]);
+  const relaxed = fr(sim.run([[8000, {}]]));
+  const closed = fr([...sim.run([[reactMs, {}]]), ...sim.run([[3500 - reactMs, { lidL: 1, lidR: 1 }]])]);
+  const out = quickCalibration({ relaxed, closed });
+  sim.run([[1200, {}]]);
+  return { sim, ...out };
+}
+
+test('QUICK calibration (20 s, no enrollment): every persona calibrates, even reacting 1.5 s late to "close your eyes"', () => {
+  for (const persona of Object.keys(PERSONAS)) for (const reactMs of [350, 1500]) {
+    const { cal, report } = quickSetup(persona, 31, { reactMs });
+    assert.ok(cal, `${persona} react ${reactMs}: ${report.warnings.join(';')}`);
+  }
+  const never = quickCalibration({ relaxed: quickSetupFrames(8000), closed: quickSetupFrames(3500) });
+  assert.equal(never.cal, null, 'eyes never closed must fail with a message');
+  assert.ok(never.report.warnings[0].includes('did not see your eyes close'));
+});
+function quickSetupFrames(ms) { const sim = makeSim({ seed: 40 }); return sim.run([[ms, {}]]).map((x) => ({ t: x.t, ...x.f })); }
+
+test('QUICK calibration: 10 min relaxed -> zero commands; gestures caught without any enrollment', { timeout: 300000 }, () => {
+  const tot = {};
+  for (const persona of ['typical', 'glasses', 'smallEyes', 'glassesSmall', 'weak', 'asymmetric', 'partialWink']) for (const seed of [31, 32]) {
+    const { sim, cal } = quickSetup(persona, seed);
+    const eng = new GestureEngine(cal);
+    const feed = (frames) => frames.flatMap(({ t, f }) => eng.update(f, t));
+    const relaxed = types(feed(sim.run([[600_000, {}]])));
+    assert.deepEqual(relaxed, [], `${persona}/${seed} false: ${relaxed.join(',')}`);
+    for (const g of Object.keys(G)) {
+      tot[g] ??= { hit: 0, n: 0, wrong: 0 };
+      for (let i = 0; i < 40; i++) {
+        const ev = types(feed([...sim.run([[700, {}]]), ...sim.run(G[g]), ...sim.run([[900, {}]])]));
+        tot[g].n++; if (ev.includes(g)) tot[g].hit++; if (ev.some((x) => x !== g)) { tot[g].wrong++; if (process.env.DBG) console.log('   confused', persona, g, ev.join(',')); }
+      }
+    }
+  }
+  for (const [g, { hit, n, wrong }] of Object.entries(tot)) {
+    console.log(`  quick ${g}: ${(100 * hit / n).toFixed(1)}% caught, ${wrong} confused (n=${n})`);
+    assert.ok(hit / n >= 0.93, g); assert.ok(wrong <= 2, g + ' confusions ' + wrong);
+  }
 });

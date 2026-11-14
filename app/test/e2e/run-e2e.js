@@ -207,7 +207,7 @@ try {
     await inject('DOUBLE_BLINK'); // row 0: drive speed medium -> fast
     await until(() => S('S.settings.driveSpeed === 0.5'), 3000, 'setting change');
     assert(JSON.parse(fs.readFileSync(storePath, 'utf8')).settings.driveSpeed === 0.5, 'not persisted');
-    assert((await page.content()).includes('Gestures you can use'), 'no gestures card');
+    assert((await page.content()).includes('Practice gestures'), 'no practice row');
     await shot('07-settings');
     await page.evaluate(() => window.butterApi.saveSettings({ driveSpeed: 0.35 }).then((s) => { window.__butter.S.settings = s; }));
     await inject('BOTH_CLOSED');
@@ -284,17 +284,29 @@ try {
     assert(await page.locator('#pillMulti').isHidden(), 'multiple-faces badge shown for one face');
   });
 
-  await check('calibration on a still photo (fast mode): skips gestures it can\'t see, fails safely, keeps old calibration', async () => {
+  await check('calibration on a still photo (fast mode): spoken flow runs, fails safely with a clear message, keeps old calibration', async () => {
     const before = await S('S.store.calibration.createdAt');
     await page.keyboard.press('c');
     await until(async () => (await page.locator('#lbl').textContent()).includes('Follow the circle'), 20000, 'follow-the-circle step');
-    await shot('09-cal-reading');
-    await until(() => page.locator('.report').count(), 90000, 'report card');
-    await shot('10-cal-report');
-    const txt = await page.locator('.report').innerText();
-    assert(/didn.t work/i.test(txt), 'a photo must not calibrate: ' + txt.slice(0, 200));
+    await shot('09-cal-circle');
+    await until(async () => (await page.locator('#lbl').textContent()).includes('try that again'), 60000, 'failure message');
+    await shot('10-cal-failed');
+    const txt = await page.locator('#sub').textContent();
+    assert(/not visible|did not see your eyes close/.test(txt), 'unexpected message: ' + txt);
     assert((await S('S.store.calibration.createdAt')) === before, 'bad calibration was saved');
-    return txt.replace(/\s+/g, ' ').slice(0, 170);
+    return txt;
+  });
+
+  await check('practice screen: gestures light up and count; Enter goes home', async () => {
+    await page.evaluate(() => window.__butter.go('practice'));
+    await inject('WINK_LEFT'); await inject('WINK_LEFT'); await inject('BROW_HOLD'); await inject('BOTH_CLOSED');
+    assert(await screen() === 'practice', 'a gesture left the practice screen');
+    assert((await page.locator('[data-g="WINK_LEFT"] .count').textContent()) === 'Seen 2x', 'count wrong');
+    assert(await page.locator('.practice .choice.seen').count() === 3, 'seen tiles');
+    assert(await page.locator('#pillControl').isHidden(), 'eyebrows toggled control during practice');
+    await shot('10b-practice');
+    await page.keyboard.press('Enter');
+    assert(await screen() === 'home', 'Enter did not finish');
   });
 
   await check('no renderer errors', async () => {

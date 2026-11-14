@@ -144,6 +144,16 @@ ipcMain.handle('speech:speak', async (_e, text) => {
   return { audio: out === 'butter' ? null : res?.audio || null, ms: res?.ms, error: res?.error, playLocal: out !== 'butter' };
 });
 
+// raw readings from the last calibration / practice, for debugging real-eye problems (never committed)
+ipcMain.handle('debug:save', (_e, name, data) => {
+  if (process.env.BUTTER_E2E) return false;
+  try {
+    const dir = path.join(ROOT, 'debug');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `${String(name).replace(/[^a-z]/g, '')}.json`), JSON.stringify(data));
+    return true;
+  } catch { return false; }
+});
 ipcMain.handle('butter:drive', (_e, dir) => { butter.drive(dir); return true; });
 ipcMain.handle('butter:pulse', (_e, dir, ms) => { butter.pulse(dir, ms); return true; });
 ipcMain.handle('butter:status', () => butter.status());
