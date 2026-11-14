@@ -6,7 +6,7 @@ import { FaceLock } from '../src/face-lock.js';
 import { makeSim, simCalibrationSamples, PERSONAS, G } from './sim.js';
 
 const IGNORE = new Set(['FACE_FOUND', 'FACE_LOST', 'HOLD_END', 'CALIBRATION_DRIFT', 'LONG_BLINK']);
-const types = (ev) => ev.map((e) => e.type).filter((x) => !IGNORE.has(x));
+const types = (ev, detail = false) => ev.filter((e) => !IGNORE.has(e.type)).map((e) => (detail && (e.dir || e.look) ? `${e.type}:${e.dir || e.look}` : e.type));
 
 function setup(persona, seed = 3) {
   const sim = makeSim({ seed, persona });
@@ -228,6 +228,22 @@ test('eyebrow navigation (Talk): quick raise = BROW_TAP, 1 s hold = BROW_SELECT 
   assert.deepEqual(types(feed([...sim.run([[400, { brow: 1 }]]), ...sim.run([[800, {}]])])), ['BROW_TAP']);
   assert.deepEqual(types(feed([...sim.run([[1600, { brow: 1 }]]), ...sim.run([[800, {}]])])), ['BROW_SELECT']);
   assert.deepEqual(types(feed([...sim.run([[5000, { brow: 1 }]]), ...sim.run([[800, {}]])])), ['BROW_SELECT', 'BROW_HOLD']);
+});
+
+test('drive by looking: LOOK left/center/right from gaze; eyebrows up = BROW_START with that direction, down = BROW_END', () => {
+  const { sim, feed, eng } = setup('typical', 24);
+  sim.setNatural(false);
+  eng.cal.gaze = { center: 0.05, left: 0.25, right: -0.15, ok: true };
+  eng.lookNav = true;
+  const run = (ms, o, gaze) => types(feed(sim.run([[ms, o]]).map((x) => ({ ...x, f: x.f.face ? { ...x.f, raw: { ...x.f.raw, gaze } } : x.f }))), true);
+  assert.deepEqual(run(600, {}, 0.05), []);
+  assert.deepEqual(run(600, {}, 0.24), ['LOOK:left']);
+  assert.deepEqual(run(900, { brow: 1 }, -0.15).at(-1), 'BROW_START:left', 'direction is the one from just before the eyebrows went up');
+  assert.deepEqual(run(500, {}, 0.24), ['BROW_END']);
+  assert.deepEqual(run(600, {}, 0.05), ['LOOK:center']);
+  assert.deepEqual(run(600, {}, -0.14), ['LOOK:right']);
+  assert.deepEqual(run(600, {}, 0.09), ['LOOK:center']);
+  assert.deepEqual(run(400, { brow: 1 }, 0.05), ['BROW_START:center']);
 });
 
 // ------------------------------------------------------------------ quick calibration (what the app uses)

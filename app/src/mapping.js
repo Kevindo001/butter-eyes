@@ -11,7 +11,7 @@ export const MAP = {
   talk: {
     BROW_TAP: 'cycle', BROW_SELECT: 'say',   // the simple way: quick eyebrow raise = next option, hold 1 s = say it
     WINK_LEFT: 'prev', WINK_RIGHT: 'next', DOUBLE_BLINK: 'say',
-    HOLD_LEFT: 'quickPhrases', HOLD_RIGHT: 'newReplies',
+    HOLD_LEFT: 'quickPhrases', // (hold right used to fetch new replies: removed, it fired by accident)
   },
   drive: {
     DOUBLE_BLINK: 'goStop',          // first double blink asks to confirm; second one starts. Again = stop.

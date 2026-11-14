@@ -20,6 +20,9 @@ const LEAD_MS = 70; // in an ordinary blink one eye can lead the other by a few 
 
 export const GESTURES = ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT', 'BROW_HOLD', 'BOTH_CLOSED'];
 export const BROW_TAP_MIN_MS = 120, BROW_SELECT_MS = 1000; // quick eyebrow raise = next, 1 s hold = select
+export const BROW_MOVE_MS = 150;  // Drive: eyebrows up this long = start moving; down = stop
+const LOOK_ON = 0.45, LOOK_OFF = 0.25; // fraction of the way to the calibration spot
+const DEFAULT_GAZE = { center: 0, left: 0.25 };
 export const LONG_BLINK_MS = 500; // a deliberate long blink: used only as a quick stop while driving
 
 export const DEFAULT_PARAMS = {
@@ -42,6 +45,7 @@ export class GestureEngine {
   constructor(cal) {
     this.setCalibration(cal);
     this.browNav = false; // the app turns this on for screens navigated by eyebrows
+    this.lookNav = false; // ...and this for Drive: eyes pick the direction, eyebrows move
     this.reset();
   }
 
@@ -60,6 +64,7 @@ export class GestureEngine {
     this.brow = null;            // {start, fired}
     this.wink = null;            // {side, start, holdFired, lastOk}
     this.candSide = null; this.candSince = 0;
+    this.gz = null; this.look = 'center'; this.lookLog = [];
     this.pending = null;         // first blink of a possible double: {start, end}
     this.lastClosureEnd = -Infinity;
     this.lastT = null;
@@ -90,6 +95,7 @@ export class GestureEngine {
       // a dropped frame or two is normal: keep the gesture in progress. Only a real loss resets.
       if (!this.faceLost && t - this.lastFace > p.faceLostMs) {
         if (this.wink?.holdFired === true) ev.push({ type: 'HOLD_END', t, side: this.wink.side });
+        if (this.brow?.moving) ev.push({ type: 'BROW_END', t });
         this.wink = null; this.both = null; this.brow = null; this.pending = null; this.closed = { L: false, R: false };
         this.faceLost = true;
         this.state.face = false;
@@ -206,6 +212,23 @@ export class GestureEngine {
     this.state.eyes = this.both ? 'closed' : this.wink ? `wink-${this.wink.side}` : (this.closed.L || this.closed.R) ? 'closing' : 'open';
     if (!this.wink) this.state.hold = null;
 
+    // ---------- where the eyes point, sideways: left / center / right (for Drive)
+    // Not read while an eye is closing or the eyebrows are up, so the direction you chose stays put.
+    if (typeof raw.gaze === 'number' && !this.brow && c.L < 0.4 && c.R < 0.4) {
+      const G = this.cal.gaze?.ok ? this.cal.gaze : DEFAULT_GAZE;
+      const g = (raw.gaze - G.center) / (G.left - G.center); // +1 = looking at the left calibration spot
+      this.gz = this.gz === null ? g : this.gz + 0.3 * (g - this.gz);
+      const was = this.look;
+      if (this.look === 'center') this.look = this.gz > LOOK_ON ? 'left' : this.gz < -LOOK_ON ? 'right' : 'center';
+      else if (Math.abs(this.gz) < LOOK_OFF || (this.look === 'left') !== (this.gz > 0)) this.look = 'center';
+      if (this.look !== was && this.lookNav) ev.push({ type: 'LOOK', t, dir: this.look });
+    }
+    // remember the last half second, so the direction used is the one from just BEFORE the eyebrows
+    // started to move (raising them drags the eye reading around)
+    this.lookLog.push({ t, look: this.look });
+    while (this.lookLog.length && t - this.lookLog[0].t > 600) this.lookLog.shift();
+    this.state.look = this.look; this.state.gaze = this.gz ?? 0;
+
     // ---------- eyebrows raised and held
     if (this.cal.brow && typeof raw.brow === 'number' && p.enabled.BROW_HOLD) {
       const n = (raw.brow - this.cal.brow.rest) / (this.cal.brow.raised - this.cal.brow.rest);
@@ -214,9 +237,16 @@ export class GestureEngine {
         if (!this.brow) this.brow = { start: t, fired: false };
         this.state.brow = Math.min(1, (t - this.brow.start) / p.brow.ms);
         if (!this.brow.fired && t - this.brow.start >= p.brow.ms) { this.brow.fired = true; ev.push({ type: 'BROW_HOLD', t }); }
+        if (this.lookNav && !this.brow.moving && t - this.brow.start >= BROW_MOVE_MS) {
+          this.brow.moving = true;
+          const before = this.lookLog.filter((x) => x.t <= this.brow.start - 200).at(-1) || this.lookLog[0];
+          if (before && before.look !== this.look) { this.look = before.look; this.gz = null; }
+          ev.push({ type: 'BROW_START', t, look: this.look });
+        }
         // eyebrow navigation (only where the app turns it on, e.g. Talk): held ~1 s = select
         if (this.browNav && !this.brow.selected && t - this.brow.start >= BROW_SELECT_MS) { this.brow.selected = true; ev.push({ type: 'BROW_SELECT', t }); }
       } else {
+        if (this.brow?.moving) ev.push({ type: 'BROW_END', t });
         // ...and a quick raise-and-release = next
         if (this.browNav && this.brow && !this.brow.selected && t - this.brow.start >= BROW_TAP_MIN_MS) ev.push({ type: 'BROW_TAP', t });
         this.brow = null; this.state.brow = 0;

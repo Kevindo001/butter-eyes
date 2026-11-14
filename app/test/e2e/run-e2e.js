@@ -55,7 +55,7 @@ const storePath = path.join(os.tmpdir(), `butter-e2e-${process.pid}.json`);
 const { cal, report } = fitCalibration(simCalibrationSamples(makeSim({ seed: 3 })));
 cal.report = { gestures: report.gestures };
 const seed = () => fs.writeFileSync(storePath, JSON.stringify({
-  settings: { butterUrl: `ws://127.0.0.1:${PORT}`, butterCameraUrl: 'http://127.0.0.1:1/none', voiceOut: 'laptop' },
+  settings: { butterUrl: `ws://127.0.0.1:${PORT}`, butterCameraUrl: 'http://127.0.0.1:1/none', voiceOut: 'laptop', driveMode: 'blink' },
   calibration: cal, voiceExamples: [],
 }));
 seed();
@@ -214,6 +214,28 @@ try {
   });
 
   let heardAt;
+  await check('drive (look + eyebrows): look left + eyebrows up turns left, eyebrows down stops, forward when looking ahead; 4 s eyebrows does not switch control off', async () => {
+    await page.evaluate(() => window.butterApi.saveSettings({ driveMode: 'look' }).then((s) => { window.__butter.S.settings = s; window.__butter.go('drive'); }));
+    assert(await page.locator('#looks [data-l]').count() === 3, 'look targets missing');
+    await inject('LOOK', { dir: 'left' });
+    assert(await page.locator('#looks .look').getAttribute('data-l') === 'left', 'look highlight');
+    assert(await S('screens.drive.dir') === 'stop', 'looking alone moved Butter');
+    await inject('BROW_START', { look: 'left' });
+    assert(await S('screens.drive.dir') === 'left', 'did not turn left');
+    await inject('BROW_HOLD');
+    assert(await S('S.control') === true, 'eyebrow hold switched control off while driving');
+    await shot('05b-lookdrive');
+    await inject('BROW_END');
+    assert(await S('screens.drive.dir') === 'stop', 'did not stop on release');
+    await inject('LOOK', { dir: 'center' }); await inject('BROW_START', { look: 'center' });
+    assert(await S('screens.drive.dir') === 'forward', 'did not go forward');
+    await inject('WINK_LEFT');
+    assert(await S('screens.drive.dir') === 'forward', 'a wink changed direction in look mode');
+    await inject('LONG_BLINK');
+    assert(await S('screens.drive.dir') === 'stop', 'long blink did not stop');
+    await page.evaluate(() => window.butterApi.saveSettings({ driveMode: 'blink' }).then((s) => { window.__butter.S.settings = s; window.__butter.go('home'); }));
+  });
+
   await check('talk: fake mic voice -> VAD (audio thread) -> ElevenLabs Scribe -> transcript', async () => {
     await page.evaluate(() => { window.__butter.screens.home.i = 3; window.__butter.screens.home.render(); });
     await inject('DOUBLE_BLINK');
@@ -256,7 +278,7 @@ try {
     return JSON.stringify(opts);
   });
 
-  await check('talk: hold left = quick phrases, double blink says "Yes"; hold right = new replies', async () => {
+  await check('talk: hold left = quick phrases, double blink says "Yes"; hold right no longer re-rolls', async () => {
     await inject('HOLD_LEFT', { side: 'left' }); await inject('HOLD_END', { side: 'left' });
     assert(await page.locator('.quick .choice').count() === 8, 'quick board missing');
     await shot('06-quick');
@@ -264,7 +286,7 @@ try {
     await until(() => S("screens.talk.convo.some(m => m.who === 'me' && m.text === 'Yes')"), 5000, 'said yes');
     const before = await S('screens.talk.reqId');
     await inject('HOLD_RIGHT', { side: 'right' }); await inject('HOLD_END', { side: 'right' });
-    assert(await S('screens.talk.reqId') > before, 'no refresh');
+    assert(await S('screens.talk.reqId') === before, 'hold right must not re-roll replies any more');
   });
 
   await check('talk: eyebrow raise cycles the 3 options (wraps), eyebrow hold says the focused one', async () => {

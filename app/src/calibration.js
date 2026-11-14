@@ -274,7 +274,16 @@ export function quickCalibration(samples) {
   P.dbl.closeMinMs = clamp(natP95 + 25, 200, 300);
   const restB = relaxed.map((f) => f.raw.brow).filter((v) => typeof v === 'number');
   const brow = restB.length > 20 ? { rest: median(restB), raised: median(restB) + 0.4 } : null;
-  const cal = { version: 3, quick: true, createdAt: Date.now(), tf, swapB: false, swapSides: false, brow, params: P };
+  // sideways gaze: what the reading looks like when the circle sat at the left and right of the screen
+  let gaze = null;
+  const gAt = (pick) => relaxed.filter((f) => f.settled && typeof f.raw.gaze === 'number' && pick(f.x) && closure(f.raw, tf).L < 0.4 && closure(f.raw, tf).R < 0.4).map((f) => f.raw.gaze);
+  const gl = gAt((x) => x < 35), gr = gAt((x) => x > 65);
+  if (gl.length > 8 && gr.length > 8) {
+    const left = median(gl), right = median(gr);
+    gaze = { left, right, center: (left + right) / 2, ok: Math.abs(left - right) > 0.08 };
+    if (!gaze.ok) report.notes.push('Looking left and right barely showed up, so steering by looking may be unreliable.');
+  }
+  const cal = { version: 3, quick: true, createdAt: Date.now(), tf, swapB: false, swapSides: false, brow, gaze, params: P };
   if (samples.sig?.length) {
     const dims = samples.sig[0].length;
     const m = Array.from({ length: dims }, (_, i) => median(samples.sig.map((x) => x[i])));
@@ -282,6 +291,6 @@ export function quickCalibration(samples) {
     cal.signature = { mean: m, sd };
   }
   report.ok = true;
-  report.stats = { openB: bMid, closedB: hi, lidOpen: rOpen, lidClosed: rMin, naturalBlinks: nat.length, slowBlinkMinMs: Math.round(P.dbl.closeMinMs), closedMs: Math.round(closedMs) };
+  report.stats = { openB: bMid, closedB: hi, lidOpen: rOpen, lidClosed: rMin, gaze, naturalBlinks: nat.length, slowBlinkMinMs: Math.round(P.dbl.closeMinMs), closedMs: Math.round(closedMs) };
   return { cal, report };
 }

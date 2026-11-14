@@ -237,3 +237,12 @@ canvas#snake { background: var(--linen); border-radius: var(--r); border: 3px so
 .practice .choice .count { font-size: 14px; font-weight: 700; color: var(--ink-3); margin-top: 6px; }
 .practice .choice.seen { background: var(--go-soft); border-color: var(--go); }
 .practice .choice.seen .count { color: oklch(36% 0.1 152); }
+
+/* ---------- drive by looking: three targets across the bottom of the window */
+.looks { position: fixed; left: 0; right: 0; bottom: 26px; height: 120px; pointer-events: none; z-index: 5; }
+.looks > div { position: absolute; top: 0; width: 150px; height: 120px; display: grid; place-items: center; align-content: center; gap: 6px;
+  background: #fff; border: 3px solid var(--ink-3); color: var(--ink-2); font-weight: 800; font-size: 18px; }
+.looks > div svg { width: 40px; height: 40px; }
+.looks [data-l="left"] { left: 3%; } .looks [data-l="center"] { left: calc(50% - 75px); } .looks [data-l="right"] { right: 3%; }
+.looks > div.look { border-color: var(--lamp-deep); background: #fff3c4; color: var(--ink); }
+.looks > div.on { border-color: var(--go); background: var(--go-soft); color: var(--ink); }

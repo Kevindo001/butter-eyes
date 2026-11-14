@@ -52,7 +52,7 @@ const TONES = {
   on: () => { beep(660, 110); beep(990, 180, 110); },         // eye control on
   off: () => { beep(990, 110); beep(660, 180, 110); },        // eye control off
 };
-const TONE_FOR = { BROW_TAP: 'nav', WINK_LEFT: 'nav', WINK_RIGHT: 'nav', BROW_SELECT: 'select', DOUBLE_BLINK: 'select', HOLD_LEFT: 'hold', HOLD_RIGHT: 'hold', BOTH_CLOSED: 'back', LONG_BLINK: 'stop' };
+const TONE_FOR = { BROW_START: 'hold', BROW_TAP: 'nav', WINK_LEFT: 'nav', WINK_RIGHT: 'nav', BROW_SELECT: 'select', DOUBLE_BLINK: 'select', HOLD_LEFT: 'hold', HOLD_RIGHT: 'hold', BOTH_CLOSED: 'back', LONG_BLINK: 'stop' };
 
 function pulse() { flash.classList.remove('go'); void flash.offsetWidth; flash.classList.add('go'); }
 
@@ -61,6 +61,7 @@ const LABEL = { BROW_TAP: 'Eyebrow raise', BROW_SELECT: 'Eyebrow hold', BROW_HOL
 // ============================================================ input bus
 function dispatch(ev) {
   if (S.calibrating && ev.src !== 'test') return;
+  if (ev.type === 'BROW_HOLD' && S.screenName === 'drive' && lookDrive() && ev.src !== 'key') return; // eyebrows are the throttle there
   if (ev.type === 'BROW_HOLD' && S.screenName !== 'practice') { setControl(!S.control); TONES[S.control ? 'on' : 'off'](); pulse(); return; }
   // eye control off: nothing fires except the safety stop and status events
   if (!S.control && ev.src !== 'key' && !['BOTH_CLOSED', 'LONG_BLINK', 'FACE_LOST', 'FACE_FOUND', 'CALIBRATION_DRIFT'].includes(ev.type)) return;
@@ -73,6 +74,7 @@ function dispatch(ev) {
   if (ev.type === 'BOTH_CLOSED' && !['home', 'calibrate', 'practice'].includes(S.screenName)) go('home');
 }
 
+const lookDrive = () => (S.settings.driveMode || 'look') === 'look';
 function setControl(on) {
   S.control = on;
   if (!on && S.screenName === 'drive') screens.drive.stop();
@@ -92,6 +94,13 @@ addEventListener('keydown', (e) => {
   if (e.key === 'c') go('calibrate');
   if (e.key === 'b') dispatch({ type: 'BROW_HOLD', t, src: 'key' });
 });
+addEventListener('keydown', (e) => {
+  if (e.target.matches('input, textarea') || e.repeat || S.screenName !== 'drive') return;
+  const t = performance.now(), look = { j: 'left', k: 'center', l: 'right' }[e.key];
+  if (look) dispatch({ type: 'LOOK', dir: look, t, src: 'key' });
+  if (e.key === 'w') dispatch({ type: 'BROW_START', look: screens.drive.look, t, src: 'key' });
+});
+addEventListener('keyup', (e) => { if (e.key === 'w' && S.screenName === 'drive') dispatch({ type: 'BROW_END', t: performance.now(), src: 'key' }); });
 addEventListener('keyup', (e) => {
   if (HOLDKEYS[e.key] && !e.target.matches('input, textarea')) dispatch({ type: 'HOLD_END', side: HOLDKEYS[e.key], t: performance.now(), src: 'key' });
 });
@@ -143,8 +152,8 @@ screens.home = {
 
 // ---------------------------------------------------------------- drive
 screens.drive = {
-  enter() { this.dir = 'stop'; this.cruise = false; this.confirmUntil = 0; this.render(); },
-  exit() { this.set('stop'); clearTimeout(this.timer); },
+  enter() { this.dir = 'stop'; this.cruise = false; this.confirmUntil = 0; this.look = S.engine?.look || 'center'; if (S.engine) S.engine.lookNav = lookDrive(); this.render(); },
+  exit() { this.set('stop'); clearTimeout(this.timer); if (S.engine) S.engine.lookNav = false; },
   set(dir) { if (dir === this.dir) return; this.dir = dir; api.drive(dir); this.paint(); },
   nudge(dir) {
     clearTimeout(this.timer);
@@ -159,13 +168,18 @@ screens.drive = {
       <aside class="sidebar">
         <div class="sidecard" id="ctlCard">
           <small>Eye control</small><b id="ctlState"></b>
-          <span>${canBrow ? 'Raise eyebrows 4 s to switch' : 'Press B to switch'}</span>
+          <span>${canBrow && !lookDrive() ? 'Raise eyebrows 4 s to switch' : 'Press B to switch'}</span>
         </div>
         <div class="sidecard dim">
-          <small>Mode</small><b>Blink drive</b>
-          <span>Joystick mode: coming next</span>
+          <small>Mode</small><b>${lookDrive() ? 'Look + eyebrows' : 'Blink drive'}</b>
+          <span>Change in Settings</span>
         </div>
-        <div class="dpad" id="dpad">
+        ${lookDrive() ? `<div class="legend">
+          <b>Look</b> left, ahead or right to pick<br>
+          <b>Raise eyebrows</b>: Butter moves that way<br>
+          <b>Relax eyebrows</b>: stop<br>
+          <b>Both eyes 3 s</b>: exit
+        </div>` : `<div class="dpad" id="dpad">
           <div></div><div data-d="forward">${ICONS.up}</div><div></div>
           <div data-d="left">${ICONS.left}</div><div class="mid" id="mid"></div><div data-d="right">${ICONS.right}</div>
           <div></div><div data-d="backward">${ICONS.down}</div><div></div>
@@ -176,8 +190,11 @@ screens.drive = {
           <b>Close left eye</b>: turn right<br>
           <b>Close right eye</b>: turn left<br>
           <b>Both eyes 3 s</b>: stop, exit
-        </div>
+        </div>`}
       </aside>
+      ${lookDrive() ? `<div class="looks" id="looks">
+        <div data-l="left">${ICONS.left}<span>Left</span></div><div data-l="center">${ICONS.up}<span>Forward</span></div><div data-l="right">${ICONS.right}<span>Right</span></div>
+      </div>` : ''}
       <div class="feed" id="feed">
         <img id="feedImg" src="${esc(cam)}" alt="" />
         <div class="offline" id="feedOff" hidden>Butter's camera is not reachable<br><small>${esc(cam)}</small></div>
@@ -197,7 +214,9 @@ screens.drive = {
     b.textContent = !S.butter.connected ? 'Butter offline' : !S.control ? 'Eye control off' : moving ? names[this.dir] : confirming ? 'Double blink again to go' : 'Parked';
     $('#feed').classList.toggle('driving', moving);
     main.querySelectorAll('#dpad [data-d]').forEach((el) => el.classList.toggle('on', el.dataset.d === this.dir));
-    $('#mid').textContent = this.cruise ? 'cruise' : '';
+    const mid = $('#mid'); if (mid) mid.textContent = this.cruise ? 'cruise' : '';
+    const want = { left: 'left', right: 'right', forward: 'center' }[this.dir];
+    main.querySelectorAll('#looks [data-l]').forEach((el) => { el.classList.toggle('look', el.dataset.l === this.look); el.classList.toggle('on', el.dataset.l === want); });
     const cs = $('#ctlState'); if (cs) { cs.textContent = S.control ? 'On' : 'Off'; $('#ctlCard').classList.toggle('off', !S.control); }
   },
   on(ev) {
@@ -210,6 +229,12 @@ screens.drive = {
       if (performance.now() - (this.quickStopAt || 0) < 2600) { this.quickStopAt = 0; return true; } // same eye-close that already stopped it
       if (this.dir !== 'stop' || this.cruise || performance.now() < this.confirmUntil) this.stop('Stopped');
       else go('home');
+      return true;
+    }
+    if (lookDrive()) { // eyes pick the direction, eyebrows are the throttle (release = stop)
+      if (ev.type === 'LOOK') { this.look = ev.dir; this.paint(); }
+      else if (ev.type === 'BROW_START') { this.look = ev.look || this.look; this.set({ left: 'left', right: 'right', center: 'forward' }[this.look]); }
+      else if (ev.type === 'BROW_END') this.set('stop');
       return true;
     }
     if (ev.type === 'HOLD_END') { if (!this.cruise && (this.dir === 'left' || this.dir === 'right')) this.set('stop'); else if (this.cruise) this.set('forward'); return true; }
@@ -255,9 +280,12 @@ screens.talk = {
   heard(text) { this.convo.push({ who: 'them', text, t: Date.now() }); this.render(); this.refresh(); },
   async refresh() {
     const id = ++this.reqId;
-    this.loading = true; this.paintOptions();
+    const choosing = performance.now() - (this.lastNav || 0) < 4000 && this.options.length;
+    if (!choosing) { this.loading = true; this.paintOptions(); }
     const r = await api.suggest(this.convo);
     if (id !== this.reqId) return;
+    // never swap the replies out from under someone who is in the middle of choosing
+    while (performance.now() - (this.lastNav || 0) < 4000) { await sleep(300); if (id !== this.reqId) return; }
     this.loading = false;
     this.options = centerOut(r.replies);
     this.focus = Math.floor(this.options.length / 2);
@@ -301,6 +329,7 @@ screens.talk = {
   },
   on(ev) {
     const a = actionFor('talk', ev.type);
+    if (a === 'cycle' || a === 'prev' || a === 'next') this.lastNav = performance.now();
     if (a === 'cycle') { // eyebrows: step through the options, wrapping round
       if (this.quick) this.qfocus = (this.qfocus + 1) % QUICK.length;
       else if (this.options.length) this.focus = (this.focus + 1) % this.options.length;
@@ -364,6 +393,7 @@ screens.settings = {
     const s = S.settings;
     return [
       { k: 'driveSpeed', label: 'Drive speed', vals: [{ v: 0.1, l: '10%' }, { v: 0.2, l: '20%' }, { v: 0.35, l: '35%' }] },
+      { k: 'driveMode', label: 'Drive with', vals: [{ v: 'look', l: 'Look + eyebrows' }, { v: 'blink', l: 'Blinks and winks' }] },
       { k: 'voiceOut', label: 'Voice comes out of', vals: [{ v: 'laptop', l: 'Laptop' }, { v: 'butter', l: 'Butter' }, { v: 'both', l: 'Both' }] },
       { k: 'recal', label: 'Recalibrate eyes', action: () => go('calibrate') },
       { k: 'practice', label: 'Practice gestures', action: () => go('practice') },
@@ -421,7 +451,7 @@ function speak(text) {
 }
 screens.calibrate = {
   enter() {
-    this.cancelled = false;
+    this.cancelled = false; this.spotX = 50; this.spotAt = performance.now();
     S.calibrating = true;
     main.innerHTML = `<div class="calib">
       <div class="target" id="tgt"><div></div></div>
@@ -434,7 +464,7 @@ screens.calibrate = {
   collect(ms, into) {
     return new Promise((res) => {
       const off = S.tracker.onFrame((f, t) => {
-        into.push(f.face ? { t, face: true, raw: f.raw } : { t, face: false });
+        into.push(f.face ? { t, face: true, raw: f.raw, x: this.spotX, settled: performance.now() - this.spotAt > 750 * SPEED } : { t, face: false });
         if (f.face && f.sig && this.sigs) this.sigs.push(f.sig);
       });
       setTimeout(() => { off(); res(into); }, ms * SPEED);
@@ -475,9 +505,9 @@ screens.calibrate = {
     await speak('Follow the circle with your eyes. Blink normally.');
     if (this.cancelled) return;
     beep(660, 150);
-    const spots = [[50, 42], [22, 30], [78, 30], [78, 60], [22, 60], [50, 42]];
+    const spots = [[50, 42], [12, 42], [88, 42], [12, 42], [88, 42], [50, 42]]; // far left / right also teach it where you look to steer
     const relaxed = this.collect(QCAL.RELAXED_MS, samples.relaxed);
-    for (const [x, y] of spots) { this.circle(x, y); await sleep((QCAL.RELAXED_MS / spots.length) * SPEED); if (this.cancelled) return; }
+    for (const [x, y] of spots) { this.circle(x, y); this.spotX = x; this.spotAt = performance.now(); await sleep((QCAL.RELAXED_MS / spots.length) * SPEED); if (this.cancelled) return; }
     await relaxed;
 
     // ---- 2. closed: voice in, beep out (no reading with your eyes shut)
@@ -560,6 +590,7 @@ function chime() {
 function startEngine(cal) {
   S.engine = new GestureEngine(cal);
   S.engine.browNav = S.screenName === 'talk';
+  S.engine.lookNav = S.screenName === 'drive' && lookDrive();
   if (cal.signature) S.tracker?.lock.setSignature(cal.signature);
 }
 
