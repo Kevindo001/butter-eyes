@@ -7,7 +7,8 @@ import { MicListener } from './audio.js';
 import { centerOut } from '../lib/llm.js';
 import { Snake } from './snake.js';
 import { ICONS } from './icons.js';
-import { actionFor, hints, setNav, browMenus } from './mapping.js';
+import { actionFor, hints, setNav, browMenus, setLegacy } from './mapping.js';
+setLegacy(!!window.butterApi?.e2e); // the end-to-end run still exercises the retired one-eye paths
 
 const api = window.butterApi;
 const $ = (s, el = document) => el.querySelector(s);
@@ -68,7 +69,7 @@ function dispatch(ev) {
   // eye control off: nothing fires except the safety stop and status events
   if (!S.control && ev.src !== 'key' && !['BOTH_CLOSED', 'LONG_BLINK', 'FACE_LOST', 'FACE_FOUND', 'CALIBRATION_DRIFT'].includes(ev.type)) return;
   S.log.push({ type: ev.type, t: Math.round(ev.t), screen: S.screenName });
-  if (TONE_FOR[ev.type] && !(ev.type === 'LONG_BLINK' && S.screenName !== 'drive')) TONES[TONE_FOR[ev.type]]();
+  if (TONE_FOR[ev.type] && !(ev.type === 'LONG_BLINK' && S.screenName !== 'drive') && !(S.screenName === 'snake' && /^(BROW_START|WINK_|HOLD_)/.test(ev.type))) TONES[TONE_FOR[ev.type]]();
   if (S.log.length > 300) S.log.shift();
   if (LABEL[ev.type]) { pulse(); const g = $('#lastGesture'); if (g) { g.textContent = LABEL[ev.type]; g.classList.remove('show'); void g.offsetWidth; g.classList.add('show'); } }
   if (ev.type === 'CALIBRATION_DRIFT') { S.status.drift = true; paintPills(); toast('Your eyes look different from calibration (glasses on or off?). Recalibrate in Settings.', 5000); return; }
@@ -76,7 +77,8 @@ function dispatch(ev) {
   if (ev.type === 'BOTH_CLOSED' && !['home', 'calibrate', 'practice'].includes(S.screenName)) go('home');
 }
 
-const lookDrive = () => (S.settings.driveMode || 'look') === 'look';
+// Drive is always look + eyebrows now (the old blink / wink drive needed winks, which were removed)
+const lookDrive = () => !api.e2e || (S.settings.driveMode || 'look') === 'look';
 function setControl(on) {
   S.control = on;
   if (!on && S.screenName === 'drive') screens.drive.stop();
@@ -98,12 +100,12 @@ addEventListener('keydown', (e) => {
   if (e.key === 'b') dispatch({ type: 'BROW_HOLD', t, src: 'key' });
 });
 addEventListener('keydown', (e) => {
-  if (e.target.matches('input, textarea') || e.repeat || S.screenName !== 'drive') return;
+  if (e.target.matches('input, textarea') || e.repeat || !['drive', 'snake'].includes(S.screenName)) return;
   const t = performance.now(), look = { j: 'left', k: 'center', l: 'right' }[e.key];
   if (look) dispatch({ type: 'LOOK', dir: look, t, src: 'key' });
-  if (e.key === 'w') dispatch({ type: 'BROW_START', look: screens.drive.look, t, src: 'key' });
+  if (e.key === 'w') dispatch({ type: 'BROW_START', look: S.screen.look, t, src: 'key' });
 });
-addEventListener('keyup', (e) => { if (e.key === 'w' && S.screenName === 'drive') dispatch({ type: 'BROW_END', t: performance.now(), src: 'key' }); });
+addEventListener('keyup', (e) => { if (e.key === 'w' && ['drive', 'snake'].includes(S.screenName)) dispatch({ type: 'BROW_END', t: performance.now(), src: 'key' }); });
 addEventListener('keyup', (e) => {
   if (HOLDKEYS[e.key] && !e.target.matches('input, textarea')) dispatch({ type: 'HOLD_END', side: HOLDKEYS[e.key], t: performance.now(), src: 'key' });
 });
@@ -120,7 +122,7 @@ function go(name, arg) {
   S.screen.enter?.(arg);
 }
 // menus are moved through by eyebrow raise or by winks (Settings > Navigate with)
-function syncNav() { setNav(S.settings?.navWith); if (S.engine) S.engine.browNav = browMenus(S.screenName); }
+function syncNav() { setNav(api.e2e ? S.settings?.navWith : 'brow'); if (S.engine) S.engine.browNav = browMenus(S.screenName); }
 const enabled = () => S.engine?.p?.enabled || {};
 const hintRow = (screen, labels) => `<div class="hint">${hints(screen, labels, enabled()).map(([g, a]) => `<span><kbd>${esc(g)}</kbd>${esc(a)}</span>`).join('')}</div>`;
 
@@ -386,7 +388,10 @@ async function playAudio(r, text) {
 screens.snake = {
   enter() {
     main.innerHTML = `<section class="screen snakefull"><canvas id="snake"></canvas><div class="snakescore" id="score">Score 0</div>
-      <div class="snakehint">Wink left / right to turn. Double blink: pause. Both eyes 3 s: home.</div></section>`;
+      <div class="snakelook" data-l="left">${ICONS.left}<span>Turn left</span></div><div class="snakelook" data-l="right">${ICONS.right}<span>Turn right</span></div>
+      <div class="snakehint">Look left or right, then raise your eyebrows to turn. Double blink: pause. Both eyes 3 s: home.</div></section>`;
+    this.look = 'center';
+    if (S.engine) { S.engine.lookNav = true; S.engine.recentreGaze(performance.now()); }
     // fill the whole window with square cells
     const box = main.getBoundingClientRect(), cell = 46;
     const cols = Math.max(12, Math.floor((box.width - 8) / cell)), rows = Math.max(9, Math.floor((box.height - 8) / cell));
@@ -396,13 +401,16 @@ screens.snake = {
     this.rec = { t0: performance.now(), events: [], frames: [] }; // winks are being tuned on Snake: keep the readings
     this.off = S.tracker?.onFrame((f, t) => { if (this.rec.frames.length < 5400) this.rec.frames.push(f.face ? { t, face: true, raw: f.raw } : { t, face: false }); });
   },
-  exit() { this.game?.stop(); this.off?.(); api.saveDebug('snake', { cal: S.engine?.cal?.params, ...this.rec }); },
+  exit() { this.game?.stop(); this.off?.(); if (S.engine) S.engine.lookNav = false; api.saveDebug('snake', { cal: S.engine?.cal?.params, ...this.rec }); },
   on(ev) {
     if (this.rec.events.length < 3000) this.rec.events.push({ t: Math.round(ev.t), type: ev.type });
     const a = actionFor('snake', ev.type);
     const L = { up: 'left', left: 'down', down: 'right', right: 'up' }, R = { up: 'right', right: 'down', down: 'left', left: 'up' };
-    if (a === 'turnLeft') { this.game.turn(L[this.game.dir]); return true; }
-    if (a === 'turnRight') { this.game.turn(R[this.game.dir]); return true; }
+    const turn = (side) => { this.game.turn((side === 'left' ? L : R)[this.game.dir]); TONES.nav(); };
+    // eyes pick the side, a raise of the eyebrows makes the turn (same idea as Look Drive)
+    if (ev.type === 'LOOK') { this.look = ev.dir; main.querySelectorAll('.snakelook').forEach((el) => el.classList.toggle('look', el.dataset.l === this.look)); return true; }
+    if (ev.type === 'BROW_START') { const side = ev.look || this.look; if (side === 'left' || side === 'right') turn(side); return true; }
+    if (ev.src === 'key' && (ev.type === 'WINK_LEFT' || ev.type === 'WINK_RIGHT')) { turn(ev.type === 'WINK_LEFT' ? 'left' : 'right'); return true; } // arrow keys
     if (a === 'pause') { this.game.toggle(); return true; }
     return false;
   },
@@ -469,8 +477,6 @@ screens.settings = {
     const s = S.settings;
     return [
       { k: 'driveSpeed', label: 'Drive speed', vals: [{ v: 0.05, l: '5%' }, { v: 0.1, l: '10%' }, { v: 0.2, l: '20%' }] },
-      { k: 'driveMode', label: 'Drive with', vals: [{ v: 'look', l: 'Look Drive (look + eyebrows)' }, { v: 'blink', l: 'Blink Drive' }] },
-      { k: 'navWith', label: 'Navigate with', vals: [{ v: 'brow', l: 'Eyebrows (quick raise = next)' }, { v: 'wink', l: 'Winks (left / right)' }] },
       { k: 'voiceOut', label: 'Voice comes out of', vals: [{ v: 'laptop', l: 'Laptop' }, { v: 'butter', l: 'Butter' }, { v: 'both', l: 'Both' }] },
       { k: 'recal', label: 'Recalibrate eyes', action: () => go('calibrate') },
       { k: 'practice', label: 'Practice gestures', action: () => go('practice') },
@@ -569,7 +575,7 @@ screens.calibrate = {
         const issue = !f.face ? (f.multiple ? 'Only one person in view, please' : 'Sit in front of the camera')
           : f.eyePx < 22 ? 'Move a little closer to the screen'
           : f.glare > 0.06 ? 'Light is reflecting off your glasses: tilt the screen down a little' : '';
-        this.set(issue || 'Ready?', issue ? '' : 'Calibration takes about 40 seconds');
+        this.set(issue || 'Ready?', issue ? '' : 'Calibration takes about 25 seconds');
         good = issue ? 0 : good + 1;
         if (good > 15 || this.cancelled || (performance.now() - t0 > 20000 * SPEED && f.face)) { off(); res(); }
       });
@@ -607,17 +613,6 @@ screens.calibrate = {
     await this.collect(QCAL.BROW_MS, samples.brow);
     beep(880, 500);
     await sleep(500 * SPEED);
-    // ---- 4. winks: each side, because most people have a weaker side
-    for (const [key, side] of [['winkL', 'left'], ['winkR', 'right']]) {
-      samples[key] = [];
-      this.set(`Wink your ${side} eye`, 'Keep it closed until the beep');
-      await speak(`Now close only your ${side} eye, and keep it closed until the beep.`);
-      if (this.cancelled) return;
-      this.circle(50, 42, QCAL.WINK_MS);
-      await this.collect(QCAL.WINK_MS, samples[key]);
-      beep(880, 400);
-      await sleep(600 * SPEED);
-    }
     this.set('Done', '');
     await sleep(400 * SPEED);
 
@@ -641,22 +636,21 @@ screens.calibrate = {
 
 // ---------------------------------------------------------------- practice: try each gesture, see it register
 const PRACTICE = [
+  { g: 'BROW_TAP', label: 'Quick eyebrow raise', how: 'Raise your eyebrows and let go' },
   { g: 'DOUBLE_BLINK', label: 'Slow double blink', how: 'Two slow, firm blinks' },
-  { g: 'WINK_LEFT', label: 'Wink left', how: 'Close only your left eye, a quick wink' },
-  { g: 'WINK_RIGHT', label: 'Wink right', how: 'Close only your right eye, a quick wink' },
-  { g: 'HOLD_LEFT', label: 'Hold left', how: 'Keep your left eye closed 1 second' },
-  { g: 'HOLD_RIGHT', label: 'Hold right', how: 'Keep your right eye closed 1 second' },
+  { g: 'LONG_BLINK', label: 'Long blink', how: 'Close both eyes half a second' },
   { g: 'BROW_HOLD', label: 'Eyebrows', how: 'Raise your eyebrows 4 seconds' },
   { g: 'BOTH_CLOSED', label: 'Both eyes closed', how: 'Close both eyes 3 seconds' },
 ];
 screens.practice = {
   enter() {
     this.counts = {}; this.frames = []; this.events = []; this.t0 = performance.now();
+    if (S.engine) S.engine.browNav = true; // so quick eyebrow raises are reported here too
     this.off = S.tracker?.onFrame((f, t) => { if (this.frames.length < 2400) this.frames.push(f.face ? { t, face: true, raw: f.raw } : { t, face: false }); });
     this.render();
     speak('Now try each gesture. It lights up when I see it.');
   },
-  exit() { this.off?.(); api.saveDebug('practice', { counts: this.counts, events: this.events, frames: this.frames }); },
+  exit() { this.off?.(); syncNav(); api.saveDebug('practice', { counts: this.counts, events: this.events, frames: this.frames }); },
   render() {
     main.innerHTML = `<section class="screen">
       <div><h1>Try each gesture</h1><h2>Each one lights up when BLINC sees it. Press Enter when you're done.</h2></div>
@@ -699,6 +693,11 @@ addEventListener('keydown', listenStart);
 addEventListener('keyup', (e) => { if (e.key === ' ') listenStop(); });
 addEventListener('blur', listenStop);
 
+// Talk: P shows or hides the quick phrases (Yes, No, I need help, ...)
+addEventListener('keydown', (e) => {
+  if (e.key !== 'p' || S.screenName !== 'talk' || e.target.matches('input, textarea') || e.repeat) return;
+  const t = screens.talk; t.quick = !t.quick; t.qfocus = 0; t.paintOptions(); TONES.nav();
+});
 // Talk: R wipes the conversation and what it learned, and starts again from nothing
 addEventListener('keydown', async (e) => {
   if (e.key !== 'r' || S.screenName !== 'talk' || e.target.matches('input, textarea') || e.repeat) return;
@@ -720,8 +719,11 @@ function chime() {
 // ============================================================ tracking + HUD
 function startEngine(cal) {
   S.engine = new GestureEngine(cal);
+  // one-eye gestures are retired: a lopsided closure is still recognised (so it is not mistaken for a
+  // blink) but never becomes a command
+  S.engine.p = { ...S.engine.p, enabled: { ...S.engine.p.enabled, WINK_LEFT: false, WINK_RIGHT: false, HOLD_LEFT: false, HOLD_RIGHT: false } };
   syncNav();
-  S.engine.lookNav = S.screenName === 'drive' && lookDrive();
+  S.engine.lookNav = (S.screenName === 'drive' && lookDrive()) || S.screenName === 'snake';
   if (cal.signature) S.tracker?.lock.setSignature(cal.signature);
 }
 

@@ -402,14 +402,22 @@ try {
     await page.fill('#typeIn', '');
   });
 
-  await check('talk -> home (eyes closed 2 s); snake turns relative to its heading on winks', async () => {
+  await check('talk -> home (eyes closed 2 s); snake turns by looking left / right and raising eyebrows', async () => {
     await inject('BOTH_CLOSED');
     assert(await screen() === 'home', 'not home');
     await page.evaluate(() => { window.__butter.screens.home.i = 1; window.__butter.screens.home.render(); });
     await inject('DOUBLE_BLINK');
     assert(await screen() === 'snake', 'snake not open');
-    await inject('WINK_RIGHT'); await sleep(700);
-    assert(await S('screens.snake.game.dir') === 'down', 'snake did not turn right from heading right');
+    await inject('WINK_RIGHT'); await sleep(500);
+    assert(await S('screens.snake.game.dir') === 'right', 'a wink turned the snake (winks are no longer used)');
+    await inject('BROW_START', { look: 'center' }); await sleep(500);
+    assert(await S('screens.snake.game.dir') === 'right', 'eyebrows turned the snake while looking straight ahead');
+    await inject('LOOK', { dir: 'right' });
+    assert(await page.locator('.snakelook.look').getAttribute('data-l') === 'right', 'look target not highlighted');
+    await inject('BROW_START', { look: 'right' }); await sleep(700);
+    assert(await S('screens.snake.game.dir') === 'down', 'look right + eyebrows did not turn right from heading right');
+    await inject('BROW_END'); await inject('LOOK', { dir: 'left' }); await inject('BROW_START', { look: 'left' }); await sleep(700);
+    assert(await S('screens.snake.game.dir') === 'right', 'look left + eyebrows did not turn left from heading down');
     await shot('08-snake');
     await inject('BOTH_CLOSED');
   });
@@ -434,9 +442,10 @@ try {
 
   await check('practice screen: gestures light up and count; Enter goes home', async () => {
     await page.evaluate(() => window.__butter.go('practice'));
-    await inject('WINK_LEFT'); await inject('WINK_LEFT'); await inject('BROW_HOLD'); await inject('BOTH_CLOSED');
+    await inject('DOUBLE_BLINK'); await sleep(500); await inject('DOUBLE_BLINK'); await inject('BROW_HOLD'); await inject('BOTH_CLOSED'); await inject('WINK_LEFT');
     assert(await screen() === 'practice', 'a gesture left the practice screen');
-    assert((await page.locator('[data-g="WINK_LEFT"] .count').textContent()) === 'Seen 2x', 'count wrong');
+    assert((await page.locator('[data-g="DOUBLE_BLINK"] .count').textContent()) === 'Seen 2x', 'count wrong');
+    assert(await page.locator('[data-g="WINK_LEFT"]').count() === 0, 'wink tile still on the practice screen');
     assert(await page.locator('.practice .choice.seen').count() === 3, 'seen tiles');
     assert(await page.locator('#pillControl').isHidden(), 'eyebrows toggled control during practice');
     await shot('10b-practice');

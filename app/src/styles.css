@@ -234,7 +234,7 @@ canvas#snake { background: var(--linen); border-radius: var(--r); border: 3px so
 @media (prefers-reduced-motion: reduce) { *, *::before { animation: none !important; transition: none !important; } }
 
 /* ---------- practice */
-.practice { flex: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; align-content: start; }
+.practice { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-content: start; }
 .practice .choice { min-height: 150px; padding: 18px; gap: 6px; }
 .practice .choice b { font-size: 24px; }
 .practice .choice .count { font-size: 14px; font-weight: 700; color: var(--ink-3); margin-top: 6px; }
@@ -273,3 +273,10 @@ canvas#snake { background: var(--linen); border-radius: var(--r); border: 3px so
 
 /* talk: push-to-listen */
 .talkbar.listening { outline: 4px solid var(--go); background: var(--go-soft); }
+
+/* snake: look targets on the left and right edges */
+.snakelook { position: absolute; top: calc(50% - 75px); width: 150px; height: 150px; display: grid; place-items: center; align-content: center; gap: 6px; pointer-events: none;
+  background: rgba(255, 255, 255, .55); border: 3px solid rgba(31, 26, 23, .35); color: var(--ink-2); font-weight: 800; font-size: 18px; }
+.snakelook svg { width: 46px; height: 46px; }
+.snakelook[data-l="left"] { left: 10px; } .snakelook[data-l="right"] { right: 10px; }
+.snakelook.look { background: rgba(255, 213, 74, .85); border-color: var(--lamp-deep); color: var(--ink); }

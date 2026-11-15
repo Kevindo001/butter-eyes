@@ -1,7 +1,7 @@
 // PROVISIONAL: which eye gesture does what, per screen. One table so the mapping discussion is an
 // edit here, not a code change. BOTH_CLOSED (eyes shut 2 s) is always stop / back, on every screen.
 //
-// Gestures: DOUBLE_BLINK, WINK_LEFT, WINK_RIGHT, HOLD_LEFT, HOLD_RIGHT (+ HOLD_END), BOTH_CLOSED
+// Gestures: quick eyebrow raise, eyebrow hold, slow double blink, long blink, both eyes closed, look left / right
 // Everywhere: BROW_HOLD (eyebrows up ~1.5 s) turns eye control on / off. While driving, a long blink
 // (0.5 s) is a quick stop.
 export const MAP = {
@@ -20,7 +20,8 @@ export const MAP = {
     WINK_LEFT: 'nudgeRight', WINK_RIGHT: 'nudgeLeft',   // short turn
     HOLD_LEFT: 'spinRight', HOLD_RIGHT: 'spinLeft',     // turn for as long as the eye stays closed
   },
-  snake: { WINK_LEFT: 'turnLeft', WINK_RIGHT: 'turnRight', DOUBLE_BLINK: 'pause' },
+  // Snake is steered like Look Drive: look left or right, then raise your eyebrows (handled in app.js)
+  snake: { DOUBLE_BLINK: 'pause' },
   settings: { BROW_TAP: 'next', WINK_LEFT: 'prev', WINK_RIGHT: 'next', DOUBLE_BLINK: 'activate' },
 };
 
@@ -33,12 +34,19 @@ export const NAMES = {
 // How the menus (Home, Settings, Talk) are navigated: 'brow' = quick eyebrow raise moves on and
 // winks do nothing; 'wink' = winks move and eyebrows do nothing (for people without eyebrow control).
 // Double blink selects either way. Drive and Snake have their own controls and are not affected.
+// Winks and one-eye holds are no longer part of BLINC: for many people one side cannot be told apart
+// from closing both eyes. Their old mappings below only stay reachable for the automated end-to-end
+// run (setLegacy), and are never shown or acted on in the real app.
+const ONE_EYE = new Set(['WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT']);
+let legacy = false;
+export function setLegacy(on) { legacy = !!on; }
+
 const MENUS = new Set(['home', 'settings', 'talk']);
 const BROW_NAV = new Set(['BROW_TAP', 'BROW_SELECT']), WINK_NAV = new Set(['WINK_LEFT', 'WINK_RIGHT']);
 let nav = 'brow';
 export function setNav(style) { nav = style === 'wink' ? 'wink' : 'brow'; }
 export const browMenus = (screen) => nav === 'brow' && MENUS.has(screen);
-const off = (screen, g) => MENUS.has(screen) && (nav === 'brow' ? WINK_NAV.has(g) : BROW_NAV.has(g));
+const off = (screen, g) => (!legacy && ONE_EYE.has(g)) || (MENUS.has(screen) && (nav === 'brow' ? WINK_NAV.has(g) : BROW_NAV.has(g)));
 
 export function actionFor(screen, type) { return off(screen, type) ? null : MAP[screen]?.[type] ?? null; }
 
