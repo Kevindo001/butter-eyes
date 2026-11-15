@@ -26,7 +26,8 @@ die() { printf "\033[1;31m[butter]\033[0m %s\n" "$*"; exit 1; }
 # is never more than one controller talking to Butter. Safe for the motors: Butter stops by itself
 # within half a second of losing its controller, and its own server keeps running on the Jetson.
 if [ "$MODE" != test ]; then
-  for pid in $(pgrep -f "bash ./start.sh|butter-eyes/start.sh" || true); do
+  # only real launcher processes: "bash <something>/start.sh", never a shell that merely mentions it
+  for pid in $(ps -axo pid=,command= | awk '$2 ~ /(^|\/)bash$/ && $3 ~ /(^|\/)start\.sh$/ {print $1}'); do
     [ "$pid" != "$$" ] && [ "$pid" != "$PPID" ] && kill "$pid" 2>/dev/null || true
   done
   pkill -f "butter-eyes/app/node_modules/electron" 2>/dev/null || true
