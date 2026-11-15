@@ -705,7 +705,7 @@ function paintPills() {
 function paintFace(frame) {
   const cv = $('#camOverlay'), v = $('#video');
   if (!cv || !v.videoWidth) return;
-  if (cv.width !== 216) { cv.width = 216; cv.height = 120; }
+  if (cv.width !== 352) { cv.width = 352; cv.height = 196; }
   const ctx = cv.getContext('2d');
   if (!frame.face || !frame.landmarks) { ctx.fillStyle = '#2a2420'; ctx.fillRect(0, 0, cv.width, cv.height); return; }
   let x0 = 1, y0 = 1, x1 = 0, y1 = 0;
