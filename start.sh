@@ -22,6 +22,19 @@ done
 say() { printf "\033[1;33m[butter]\033[0m %s\n" "$*"; }
 die() { printf "\033[1;31m[butter]\033[0m %s\n" "$*"; exit 1; }
 
+# Always start clean: close any copy of the app (and pretend robot) that is already running, so there
+# is never more than one controller talking to Butter. Safe for the motors: Butter stops by itself
+# within half a second of losing its controller, and its own server keeps running on the Jetson.
+if [ "$MODE" != test ]; then
+  for pid in $(pgrep -f "bash ./start.sh|butter-eyes/start.sh" || true); do
+    [ "$pid" != "$$" ] && [ "$pid" != "$PPID" ] && kill "$pid" 2>/dev/null || true
+  done
+  pkill -f "butter-eyes/app/node_modules/electron" 2>/dev/null || true
+  pkill -f "butter-eyes/app/node_modules/.bin/electron" 2>/dev/null || true
+  pkill -f "butter-drive/server.py --mock" 2>/dev/null || true
+  sleep 1
+fi
+
 command -v node >/dev/null || die "Node.js 20+ is required: brew install node"
 command -v python3 >/dev/null || die "python3 is required"
 [ -f app/.env ] || die "app/.env is missing (DEEPSEEK_API_KEY, ELEVENLABS_API_KEY). Copy app/.env.example and fill it in."

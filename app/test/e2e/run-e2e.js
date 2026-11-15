@@ -364,9 +364,12 @@ try {
     await inject('DOUBLE_BLINK');
     await until(() => S("screens.talk.convo.some(m => m.who === 'me' && m.text === 'Yes')"), 5000, 'said yes');
     await sleep(3000); // let the refresh that follows saying "Yes" finish first
+    await page.evaluate(() => { const m = window.__butter.mic(); if (m) m.muted = true; }); // the looping test voice also refreshes replies
+    await sleep(1500);
     const before = await S('screens.talk.reqId');
     await inject('HOLD_RIGHT', { side: 'right' }); await inject('HOLD_END', { side: 'right' });
     assert(await S('screens.talk.reqId') === before, 'hold right must not re-roll replies any more');
+    await page.evaluate(() => { const m = window.__butter.mic(); if (m) m.muted = false; });
   });
 
   await check('talk: eyebrow raise cycles the 3 options (wraps), eyebrow hold says the focused one', async () => {
@@ -382,6 +385,17 @@ try {
     await until(() => S(`screens.talk.convo.some(m => m.who === 'me' && m.text === ${JSON.stringify(want)})`), 5000, 'said by eyebrow hold');
     await page.evaluate(() => window.butterApi.saveSettings({ navWith: 'wink' }).then((s) => { window.__butter.S.settings = s; window.__butter.go('talk'); }));
     return want;
+  });
+
+  await check('talk: key R resets the conversation and learned phrases, then offers fresh openers', async () => {
+    assert(await S('screens.talk.convo.length') > 0, 'setup: no conversation to reset');
+    await page.keyboard.press('r');
+    await until(() => S('screens.talk.convo.length === 0'), 3000, 'conversation cleared');
+    assert(JSON.parse(fs.readFileSync(storePath, 'utf8')).voiceExamples.length === 0, 'learned phrases not cleared');
+    await until(() => S('!screens.talk.loading && screens.talk.options.length === 3'), 15000, 'fresh replies');
+    await page.fill('#typeIn', 'r r r'); // typing an r in the caregiver box must not reset anything
+    assert(await page.inputValue('#typeIn') === 'r r r', 'typing r was swallowed');
+    await page.fill('#typeIn', '');
   });
 
   await check('talk -> home (eyes closed 2 s); snake turns relative to its heading on winks', async () => {

@@ -337,7 +337,7 @@ screens.talk = {
     const list = this.loading && !this.options.length ? ['…', '…', '…'] : this.options;
     el.innerHTML = `<div class="options">${list.map((o, i) =>
       `<div class="choice ${i === 1 ? 'best' : ''} ${i === this.focus ? 'focus' : ''} ${this.loading ? 'loading' : ''}" data-i="${i}">${esc(o)}</div>`).join('')}</div>`;
-    el.querySelectorAll('.choice').forEach((o) => o.addEventListener('click', () => { if (!this.loading) this.say(this.options[+o.dataset.i]); }));
+    el.querySelectorAll('.choice').forEach((o) => o.addEventListener('click', () => { if (this.options[+o.dataset.i]) this.say(this.options[+o.dataset.i]); }));
   },
   on(ev) {
     const a = actionFor('talk', ev.type);
@@ -354,7 +354,9 @@ screens.talk = {
       this.paintOptions(); return true;
     }
     if (a === 'say') {
-      const text = this.quick ? QUICK[this.qfocus].t : this.loading ? null : this.options[this.focus];
+      // replies on screen can always be said, even while newer ones are being fetched (a busy room
+      // keeps the mic refreshing; the person must never be locked out of answering)
+      const text = this.quick ? QUICK[this.qfocus].t : this.options[this.focus];
       if (text) { this.quick = false; this.say(text); }
       return true;
     }
@@ -674,6 +676,15 @@ screens.practice = {
   },
 };
 addEventListener('keydown', (e) => { if (e.key === 'Enter' && S.screenName === 'practice') go('home'); });
+// Talk: R wipes the conversation and what it learned, and starts again from nothing
+addEventListener('keydown', async (e) => {
+  if (e.key !== 'r' || S.screenName !== 'talk' || e.target.matches('input, textarea') || e.repeat) return;
+  const t = screens.talk;
+  t.reqId++; t.convo = []; t.options = []; t.quick = false; t.lastNav = 0; t.loading = false;
+  await api.clearTalk();
+  t.info = 'Conversation reset'; t.render(); t.refresh();
+  TONES.back(); toast('Conversation reset: starting from scratch', 2500);
+});
 
 function chime() {
   try {
@@ -705,13 +716,18 @@ function paintPills() {
 function paintFace(frame) {
   const cv = $('#camOverlay'), v = $('#video');
   if (!cv || !v.videoWidth) return;
-  if (cv.width !== 352) { cv.width = 352; cv.height = 196; }
+  if (cv.width !== 720) { cv.width = 720; cv.height = 280; }
   const ctx = cv.getContext('2d');
   if (!frame.face || !frame.landmarks) { ctx.fillStyle = '#2a2420'; ctx.fillRect(0, 0, cv.width, cv.height); return; }
-  let x0 = 1, y0 = 1, x1 = 0, y1 = 0;
-  for (const p of frame.landmarks) { if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x; if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y; }
-  const cx = ((x0 + x1) / 2) * v.videoWidth, cy = ((y0 + y1) / 2) * v.videoHeight;
-  const h = (y1 - y0) * v.videoHeight * 1.25, w = h * (cv.width / cv.height);
+  // just the part BLINC reads: forehead, eyebrows and eyes (landmarks: 10 = top of forehead,
+  // 234 / 454 = sides of the face, 145 / 374 = lower eyelids)
+  const P = frame.landmarks, W = v.videoWidth, H = v.videoHeight;
+  const faceW = Math.abs(P[454].x - P[234].x) * W;
+  const top = P[10].y * H - 0.06 * faceW, bottom = Math.max(P[145].y, P[374].y) * H + 0.14 * faceW;
+  const cx = ((P[234].x + P[454].x) / 2) * W, cy = (top + bottom) / 2;
+  // keep the canvas shape: grow whichever side is short so nothing is stretched
+  let h = bottom - top, w = h * (cv.width / cv.height);
+  if (w < faceW * 1.08) { w = faceW * 1.08; h = w * (cv.height / cv.width); }
   ctx.drawImage(v, cx - w / 2, cy - h / 2, w, h, 0, 0, cv.width, cv.height);
 }
 

@@ -63,7 +63,7 @@ svg { display: block; }
 
 /* ---------------------------------------------------------------- top bar */
 .topbar {
-  height: 112px; flex: none; display: flex; align-items: center; gap: 24px;
+  height: 156px; flex: none; display: flex; align-items: center; gap: 18px;
   padding: 0 22px 0 92px; -webkit-app-region: drag;
   border-bottom: 1px solid var(--line);
   background: var(--linen);
@@ -72,10 +72,10 @@ svg { display: block; }
 .logo { width: 40px; height: 40px; flex: none; }
 .brandtext { display: grid; line-height: 1.05; }
 .brandtext b { font-size: 26px; letter-spacing: 0.06em; }
-.brandtext small { font-size: 11px; font-weight: 600; letter-spacing: 0; color: var(--ink-3); white-space: nowrap; }
-.pills { display: flex; gap: 8px; flex: 1; }
+.brandtext small { font-size: 11px; font-weight: 600; letter-spacing: 0; color: var(--ink-3); max-width: 150px; line-height: 1.25; }
+.pills { display: flex; gap: 8px; flex: 1; flex-wrap: wrap; align-content: center; }
 .pill { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; color: var(--ink-2); padding: 7px 14px 7px 12px; border-radius: 999px; background: var(--linen); border: 1px solid var(--line); }
-.pill b { font-weight: 500; }
+.pill b { font-weight: 500; white-space: nowrap; }
 .pill i { display: none; }
 .pill.status { background: var(--stop-soft); border-color: var(--stop); color: var(--stop); }
 .pill.status.on { background: var(--go-soft); border-color: var(--go); color: oklch(36% 0.1 152); }
@@ -93,12 +93,12 @@ svg { display: block; }
 .last.show { animation: lastg 1.6s var(--ease); }
 @keyframes lastg { 10%, 70% { opacity: 1; } }
 .pill.note { background: oklch(97% 0.04 92); border-color: var(--lamp-deep); color: var(--lamp-ink); }
-.cam { position: relative; width: 176px; height: 98px; border-radius: 14px; overflow: hidden; background: var(--night); box-shadow: var(--shadow); }
+.cam { position: relative; width: 360px; height: 140px; border-radius: 14px; overflow: hidden; background: var(--night); box-shadow: var(--shadow); }
 .cam video { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .cam canvas { position: absolute; inset: 0; width: 100%; height: 100%; transform: scaleX(-1); }
 
 main { flex: 1; position: relative; overflow: hidden; }
-.screen { position: absolute; inset: 0; padding: 30px 40px 26px; display: flex; flex-direction: column; gap: 22px; animation: in .45s var(--ease); }
+.screen { position: absolute; inset: 0; padding: 18px 40px 18px; display: flex; flex-direction: column; gap: 14px; animation: in .45s var(--ease); }
 @keyframes in { from { opacity: 0; transform: translateY(8px); } }
 h1 { font-size: 40px; line-height: 1.1; letter-spacing: -0.025em; margin: 0; font-weight: 800; text-wrap: balance; }
 h2 { font-size: 20px; margin: 4px 0 0; color: var(--ink-2); font-weight: 500; }
@@ -121,11 +121,11 @@ h2 { font-size: 20px; margin: 4px 0 0; color: var(--ink-2); font-weight: 500; }
   transform: translateY(-4px) scale(1.02); box-shadow: var(--shadow-lift);
 }
 .choice.focus .ico, .choice.focus small { color: var(--lamp-ink); }
-.choice .cue { position: absolute; bottom: 14px; font-size: 13px; font-weight: 700; letter-spacing: .02em; color: var(--lamp-ink); opacity: 0; transition: opacity .25s; }
+.choice .cue { position: absolute; bottom: 6px; font-size: 13px; font-weight: 700; letter-spacing: .02em; color: var(--lamp-ink); opacity: 0; transition: opacity .25s; }
 .choice.focus .cue { opacity: .85; }
 
 /* ---------------------------------------------------------------- home */
-.cross { flex: 1; display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr; gap: 20px; min-height: 0; }
+.cross { flex: 1; display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr; gap: 12px; min-height: 0; }
 .cross .choice { font-size: 32px; font-weight: 800; letter-spacing: -0.015em; }
 .t-up { grid-column: 2; grid-row: 1; } .t-left { grid-column: 1; grid-row: 2; } .t-right { grid-column: 3; grid-row: 2; } .t-down { grid-column: 2; grid-row: 3; }
 .center { grid-column: 2; grid-row: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: var(--ink-2); gap: 12px; font-size: 17px; line-height: 1.4; }
