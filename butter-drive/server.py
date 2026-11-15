@@ -67,6 +67,57 @@ PIPER_MODEL = os.path.expanduser("~/Projects/butter/models/piper/en_US-lessac-me
 PIPER = shutil.which("piper") or next((p for p in [os.path.join(os.path.dirname(sys.executable), "piper")] if os.path.exists(p)), None)
 
 
+# Piper kept loaded in memory. Starting the piper program for every line cost about 2 s before the
+# first sound (it reloads the voice model each time); with the voice already loaded it is ~0.15 s.
+VOICE = None
+
+
+def load_voice():
+    """Load the voice once, in the background at startup, and run one throwaway line to warm it up."""
+    global VOICE
+    try:
+        from piper import PiperVoice
+        v = PiperVoice.load(PIPER_MODEL)
+        for _ in v.synthesize("ready."):
+            pass
+        VOICE = v
+        log.info("voice loaded and warm (sample rate %s)", v.config.sample_rate)
+    except Exception as e:  # fall back to starting the piper program per line
+        log.warning("could not keep the voice in memory (%s): speech will start slower", e)
+
+
+def speak_warm(text, dev):
+    """Synthesise sentence by sentence straight into the speaker, so sound starts on the first sentence.
+
+    The speaker can be briefly "busy" (the desktop sound service holds it for a few seconds after
+    the previous sound). Then aplay exits at once; we wait a moment and try again with the audio we
+    already have, instead of dropping the line.
+    """
+    t0 = time.time()
+    gen = iter(VOICE.synthesize(text))
+    bufs, first, tries = [], None, 0
+    cmd = ["aplay", "-q", "-D", dev, "-t", "raw", "-f", "S16_LE", "-r", str(VOICE.config.sample_rate), "-c", "1"]
+    while tries < 40:
+        tries += 1
+        play = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        try:
+            for b in bufs:
+                play.stdin.write(b)
+            for chunk in gen:
+                bufs.append(chunk.audio_int16_bytes)
+                if first is None:
+                    first = time.time() - t0
+                play.stdin.write(bufs[-1])
+                play.stdin.flush()
+            play.stdin.close()
+            if play.wait() == 0:
+                break
+        except (BrokenPipeError, OSError):
+            play.wait()
+        time.sleep(0.15)
+    log.info("say: voice ready after %.2f s, speaker took %d tr%s", first if first is not None else -1, tries, "y" if tries == 1 else "ies")
+
+
 def usb_speaker():
     """ALSA device of the USB speaker (its card number changes with what's plugged in), or None."""
     try:
@@ -235,6 +286,8 @@ class Server:
                     p2 = subprocess.Popen(play, stdin=p1.stdout)
                     p1.stdin.write(base64.b64decode(mp3_b64)); p1.stdin.close()
                     await asyncio.to_thread(p2.wait)
+                elif text and VOICE is not None:
+                    await asyncio.to_thread(speak_warm, text, dev)
                 elif text and PIPER and os.path.exists(PIPER_MODEL):
                     p1 = subprocess.Popen([PIPER, "--model", PIPER_MODEL, "--output_raw"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
                     p2 = subprocess.Popen(["sox", "-t", "raw", "-r", "22050", "-e", "signed", "-b", "16", "-c", "1", "-",
@@ -251,6 +304,8 @@ class Server:
 async def main(args):
     motors = Motors(args.mock, args.speed)
     srv = Server(motors)
+    if not args.mock and os.path.exists(PIPER_MODEL):
+        threading.Thread(target=load_voice, daemon=True).start()  # never delays the motors coming up
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for s in (signal.SIGINT, signal.SIGTERM):

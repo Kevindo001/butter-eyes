@@ -319,6 +319,10 @@ try {
     await page.evaluate(() => { window.__butter.screens.home.i = 3; window.__butter.screens.home.render(); });
     await inject('DOUBLE_BLINK');
     assert(await screen() === 'talk', 'talk not open');
+    // push-to-listen: nothing is heard until the spacebar is held
+    await sleep(5000);
+    assert(await S("screens.talk.convo.filter(m => m.who === 'them').length") === 0, 'heard speech without the spacebar held');
+    await page.keyboard.down('Space'); await sleep(7500); await page.keyboard.up('Space');
     const text = await until(() => S("(screens.talk.convo.find(m => m.who === 'them') || {}).text"), 25000, 'heard speech');
     heardAt = Date.now();
     assert(await page.evaluate(() => window.__butter.mic()?.mode) === 'worklet', 'mic not on the audio thread');

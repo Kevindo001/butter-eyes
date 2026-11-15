@@ -270,3 +270,6 @@ canvas#snake { background: var(--linen); border-radius: var(--r); border: 3px so
 .devrow canvas { width: 100%; height: 70px; background: #faf9f7; }
 .devrow .devnum { font-size: 28px; font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
 .devrow.on { border-color: var(--go); background: var(--go-soft); }
+
+/* talk: push-to-listen */
+.talkbar.listening { outline: 4px solid var(--go); background: var(--go-soft); }

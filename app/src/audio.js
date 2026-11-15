@@ -75,12 +75,34 @@ export class Vad {
 
 export class MicListener {
   constructor({ onUtterance, onLevel }) { this.onUtterance = onUtterance; this.onLevel = onLevel; this.muted = false; }
+  get capturing() { return !!this.capture; }
+  startCapture() { if (!this.ctx || this.capture) return; this.capture = []; this.captureLen = 0; this.capturePeak = 0; }
+  // returns 'sent', 'short' (under 0.4 s) or 'quiet' (nothing but silence)
+  stopCapture() {
+    if (!this.capture) return 'short';
+    const parts = this.capture, len = this.captureLen, peak = this.capturePeak;
+    this.capture = null; this.onLevel?.(0, false);
+    if (len / this.ctx.sampleRate < 0.4) return 'short';
+    if (peak < 0.008) return 'quiet';
+    const out = new Float32Array(len); let o = 0; for (const c of parts) { out.set(c, o); o += c.length; }
+    this.onUtterance(encodeWav(downsample(out, this.ctx.sampleRate, 16000), 16000));
+    return 'sent';
+  }
   async start() {
     this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     this.ctx = new AudioContext();
     const src = this.ctx.createMediaStreamSource(this.stream);
     this.vad = new Vad(this.ctx.sampleRate);
     const onChunk = (chunk) => {
+      // push-to-listen: while the key is held, keep everything; nothing else in the room is heard
+      if (this.capture) {
+        this.capture.push(chunk); this.captureLen += chunk.length;
+        let e = 0; for (let i = 0; i < chunk.length; i++) e += chunk[i] * chunk[i];
+        const rms = Math.sqrt(e / chunk.length); this.capturePeak = Math.max(this.capturePeak, rms);
+        this.onLevel?.(rms, true);
+        if (this.captureLen / this.ctx.sampleRate > 20) this.stopCapture(); // safety: a stuck key
+        return;
+      }
       if (this.muted) { this.vad.reset(); this.onLevel?.(0, false); return; }
       const utt = this.vad.push(chunk);
       this.onLevel?.(this.vad.level, this.vad.speaking);

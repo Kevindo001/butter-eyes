@@ -91,6 +91,7 @@ const HOLDKEYS = { a: 'left', d: 'right' };
 addEventListener('keydown', (e) => {
   if (e.target.matches('input, textarea') || e.repeat) return;
   const t = performance.now();
+  if (e.key === ' ' && S.screenName === 'talk') return; // in Talk the spacebar is push-to-listen
   if (KEYMAP[e.key]) { e.preventDefault(); dispatch({ type: KEYMAP[e.key], t, src: 'key' }); return; }
   if (HOLDKEYS[e.key]) { dispatch({ type: 'HOLD_' + HOLDKEYS[e.key].toUpperCase(), side: HOLDKEYS[e.key], t, src: 'key' }); return; }
   if (e.key === 'c') go('calibrate');
@@ -272,9 +273,9 @@ const QUICK = [
 screens.talk = {
   convo: [], options: [], focus: 1, quick: false, qfocus: 0, reqId: 0, loading: false, info: '',
   enter() { this.render(); this.startMic(); if (!this.options.length) this.refresh(); },
-  exit() { if (mic) mic.muted = true; },
+  exit() { listenStop(); if (mic) mic.muted = true; },
   async startMic() {
-    if (mic) { mic.muted = false; return; }
+    if (mic) { mic.muted = true; return; } // only listens while the spacebar is held
     if (!S.store.keys.elevenlabs) { this.info = 'Speech-to-text off (no ElevenLabs key). Type below instead.'; this.paintBar(); return; }
     mic = new MicListener({
       onLevel: (lvl, speaking) => { const m = $('#meter div'); if (m) { m.style.width = Math.min(100, lvl * 900) + '%'; m.style.background = speaking ? 'var(--lamp-deep)' : 'var(--go)'; } },
@@ -286,6 +287,7 @@ screens.talk = {
         this.paintBar();
       },
     });
+    mic.muted = true; // background voices are never transcribed: the spacebar decides what counts
     try { await mic.start(); } catch (e) { this.info = 'Microphone blocked: ' + e.message; mic = null; this.paintBar(); }
   },
   // new speech refreshes the replies but never closes the quick-phrase board the user just opened
@@ -311,12 +313,12 @@ screens.talk = {
     if (mic) mic.muted = true;
     const r = await api.speak(text);
     await playAudio(r, text);
-    setTimeout(() => { if (mic && S.screenName === 'talk') mic.muted = false; }, 350);
+
     this.refresh();
   },
   render() {
     main.innerHTML = `<section class="screen"><div class="talk">
-      <div class="convo" id="convo">${this.convo.length ? '' : '<div class="msg sys">Listening. When someone speaks to you, replies appear below.</div>'}
+      <div class="convo" id="convo">${this.convo.length ? '' : '<div class="msg sys">Hold the spacebar while someone speaks to you. Let go when they finish, and replies appear below.</div>'}
         ${this.convo.map((m) => `<div class="msg ${m.who}">${esc(m.text)}</div>`).join('')}</div>
       <div id="opts"></div>
       <div class="talkbar"><span class="ico">${ICONS.mic}</span><div class="meter" id="meter"><div></div></div><span id="info"></span>
@@ -676,6 +678,27 @@ screens.practice = {
   },
 };
 addEventListener('keydown', (e) => { if (e.key === 'Enter' && S.screenName === 'practice') go('home'); });
+// Talk: hold the spacebar while the other person speaks (push-to-listen). In a crowd, an open mic
+// transcribes everyone; this way only what is said while the key is down becomes "what was said".
+function listenStart(e) {
+  if (e.key !== ' ' || S.screenName !== 'talk' || e.target.matches('input, textarea')) return;
+  e.preventDefault();
+  if (e.repeat || !mic || mic.capturing) return;
+  mic.startCapture();
+  const t = screens.talk; t.info = 'Listening… let go of the spacebar when they finish'; t.paintBar();
+  $('.talkbar')?.classList.add('listening');
+}
+function listenStop() {
+  if (!mic?.capturing) return;
+  const r = mic.stopCapture();
+  $('.talkbar')?.classList.remove('listening');
+  const t = screens.talk;
+  if (r !== 'sent') { t.info = r === 'quiet' ? 'Heard nothing. Hold the spacebar while they speak.' : 'Too short. Hold the spacebar while they speak.'; t.paintBar(); }
+}
+addEventListener('keydown', listenStart);
+addEventListener('keyup', (e) => { if (e.key === ' ') listenStop(); });
+addEventListener('blur', listenStop);
+
 // Talk: R wipes the conversation and what it learned, and starts again from nothing
 addEventListener('keydown', async (e) => {
   if (e.key !== 'r' || S.screenName !== 'talk' || e.target.matches('input, textarea') || e.repeat) return;
