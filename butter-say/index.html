@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Butter Says</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* Type a line, press Speak, Butter says it out of its own speaker. Nothing here can move the wheels. */
+  * { box-sizing: border-box; border-radius: 0; }
+  body { margin: 0; font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; background: #faf9f7; color: #1f1a17; }
+  main { max-width: 760px; margin: 0 auto; padding: 40px 24px; }
+  h1 { font-size: 40px; margin: 0 0 4px; letter-spacing: -0.02em; }
+  #status { display: inline-block; padding: 6px 12px; font-weight: 700; font-size: 14px; border: 2px solid #b9412f; background: #fde8e4; color: #8a2a1c; margin: 10px 0 22px; }
+  #status.on { border-color: #1f8a4c; background: #d9f3e2; color: #0f5a30; }
+  textarea { width: 100%; height: 150px; font: inherit; font-size: 26px; padding: 16px; border: 3px solid #1f1a17; background: #fff; resize: vertical; }
+  textarea:focus { outline: 4px solid #f9d03c; }
+  .row { display: flex; gap: 12px; margin-top: 14px; align-items: center; }
+  button { font: inherit; font-weight: 800; cursor: pointer; border: 3px solid #1f1a17; }
+  #speak { flex: 1; font-size: 30px; padding: 20px; background: #f9d03c; }
+  #speak:disabled { background: #e6e1da; color: #8b837b; cursor: not-allowed; }
+  #speak:active:not(:disabled) { background: #e2b61f; }
+  .hint { color: #6b635c; font-size: 14px; }
+  h2 { font-size: 16px; margin: 34px 0 10px; color: #6b635c; text-transform: uppercase; letter-spacing: .06em; }
+  #recent { display: grid; gap: 8px; }
+  #recent button { text-align: left; font-weight: 600; font-size: 18px; padding: 12px 14px; background: #fff; border-width: 2px; }
+  #recent button:hover { background: #fff3c4; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Butter Says</h1>
+  <div id="status">Connecting to Butter…</div>
+  <textarea id="text" placeholder="Type what Butter should say…" autofocus></textarea>
+  <div class="row">
+    <button id="speak" disabled>Speak</button>
+  </div>
+  <p class="hint">Enter = speak. Shift + Enter = new line. This only talks; it never moves the wheels.</p>
+  <h2>Said before (click to say again)</h2>
+  <div id="recent"></div>
+</main>
+<script>
+// Butter's drive server also has a "say" command: it speaks the text through the robot's speaker.
+// Tries the USB-C cable address first, then Tailscale. ?host=1.2.3.4 in the address bar overrides both.
+const HOSTS = new URLSearchParams(location.search).get('host') ? [new URLSearchParams(location.search).get('host')] : ['192.168.55.1', '100.127.78.50'];
+const $ = (id) => document.getElementById(id);
+let ws = null, hostIdx = 0, recent = [];
+try { recent = JSON.parse(localStorage.getItem('butterSays') || '[]'); } catch {}
+
+function setStatus(on, msg) { $('status').textContent = msg; $('status').classList.toggle('on', on); $('speak').disabled = !on; }
+
+function connect() {
+  const host = HOSTS[hostIdx % HOSTS.length];
+  setStatus(false, `Connecting to Butter at ${host}…`);
+  const sock = new WebSocket(`ws://${host}:8770`);
+  const giveUp = setTimeout(() => sock.close(), 6000); // an unplugged cable address just hangs
+  sock.onopen = () => { clearTimeout(giveUp); ws = sock; sock.send(JSON.stringify({ cmd: 'hello' })); };
+  sock.onmessage = (e) => {
+    try { const m = JSON.parse(e.data); if (m.type === 'hello') setStatus(true, m.mock ? `Connected to the PRETEND robot at ${host} (no sound)` : `Butter connected (${host})`); } catch {}
+  };
+  sock.onclose = () => { clearTimeout(giveUp); if (ws === sock) ws = null; hostIdx++; setStatus(false, 'Butter not connected. Retrying…'); setTimeout(connect, 1200); };
+}
+
+function paintRecent() {
+  $('recent').innerHTML = '';
+  for (const t of recent) { const b = document.createElement('button'); b.textContent = t; b.onclick = () => speak(t); $('recent').appendChild(b); }
+}
+
+function speak(text) {
+  text = (text ?? $('text').value).trim();
+  if (!text || !ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({ cmd: 'say', text }));
+  recent = [text, ...recent.filter((t) => t !== text)].slice(0, 12);
+  try { localStorage.setItem('butterSays', JSON.stringify(recent)); } catch {}
+  paintRecent();
+  $('text').value = ''; $('text').focus();
+  const s = $('speak'); s.textContent = 'Speaking…'; setTimeout(() => { s.textContent = 'Speak'; }, 1200);
+}
+
+$('speak').onclick = () => speak();
+$('text').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); speak(); } });
+paintRecent(); connect();
+</script>
+</body>
+</html>
