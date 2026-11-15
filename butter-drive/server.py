@@ -67,6 +67,21 @@ PIPER_MODEL = os.path.expanduser("~/Projects/butter/models/piper/en_US-lessac-me
 PIPER = shutil.which("piper") or next((p for p in [os.path.join(os.path.dirname(sys.executable), "piper")] if os.path.exists(p)), None)
 
 
+# The speaker's own volume is already at its maximum and the voice already peaks at full scale, so
+# the only way to be louder is to squeeze the quiet parts up (soft limiting). 3 is about +7 dB:
+# clearly louder, still clean. 1 turns it off. Override with BUTTER_LOUD.
+LOUD = max(1.0, float(os.environ.get("BUTTER_LOUD", "3")))
+
+
+def louder(pcm16: bytes) -> bytes:
+    if LOUD <= 1.0:
+        return pcm16
+    import numpy as np
+    x = np.frombuffer(pcm16, dtype=np.int16).astype(np.float32) / 32768.0
+    y = np.tanh(LOUD * x) / np.tanh(LOUD)
+    return (y * 32767.0).astype(np.int16).tobytes()
+
+
 # Piper kept loaded in memory. Starting the piper program for every line cost about 2 s before the
 # first sound (it reloads the voice model each time); with the voice already loaded it is ~0.15 s.
 VOICE = None
@@ -104,7 +119,7 @@ def speak_warm(text, dev):
             for b in bufs:
                 play.stdin.write(b)
             for chunk in gen:
-                bufs.append(chunk.audio_int16_bytes)
+                bufs.append(louder(chunk.audio_int16_bytes))
                 if first is None:
                     first = time.time() - t0
                 play.stdin.write(bufs[-1])
@@ -281,7 +296,8 @@ class Server:
             play = ["aplay", "-q", "-D", dev]
             try:
                 if mp3_b64 and shutil.which("ffmpeg"):
-                    dec = ["ffmpeg", "-loglevel", "error", "-i", "pipe:0", "-ar", "44100", "-ac", "2", "-f", "wav", "pipe:1"]
+                    boost = ["-af", "volume=9dB,alimiter=limit=0.97:level=disabled"] if LOUD > 1.0 else []  # same idea for the mp3 voice
+                    dec = ["ffmpeg", "-loglevel", "error", "-i", "pipe:0", *boost, "-ar", "44100", "-ac", "2", "-f", "wav", "pipe:1"]
                     p1 = subprocess.Popen(dec, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
                     p2 = subprocess.Popen(play, stdin=p1.stdout)
                     p1.stdin.write(base64.b64decode(mp3_b64)); p1.stdin.close()
