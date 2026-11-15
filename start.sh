@@ -48,9 +48,10 @@ if [ "$MODE" = test ]; then
 fi
 
 # hard 3 s limit: with the cable unplugged, nc to the cable address can hang instead of failing
+# reachable IP SECONDS
 reachable() {
   nc -z "$1" 8770 >/dev/null 2>&1 & local pid=$!
-  ( sleep 3; kill "$pid" 2>/dev/null ) >/dev/null 2>&1 & local killer=$!
+  ( sleep "${2:-3}"; kill "$pid" 2>/dev/null ) >/dev/null 2>&1 & local killer=$!
   if wait "$pid" 2>/dev/null; then kill "$killer" 2>/dev/null; return 0; fi
   kill "$killer" 2>/dev/null; return 1
 }
@@ -61,11 +62,13 @@ trap cleanup EXIT INT TERM
 
 if [ "$MODE" = auto ]; then
   # try the USB-C cable first (always 192.168.55.1), then Tailscale
-  for ip in 192.168.55.1 "$JETSON_IP"; do
-    if reachable "$ip"; then JETSON_IP="$ip"; MODE=jetson; break; fi
-  done
+  # The cable answers instantly or not at all. Tailscale can take 3+ s to wake up on the first
+  # connection after sitting idle, so it gets longer and a second try before giving up.
+  if reachable 192.168.55.1 2; then JETSON_IP=192.168.55.1; MODE=jetson
+  elif reachable "$JETSON_IP" 8 || reachable "$JETSON_IP" 8; then MODE=jetson
+  fi
   if [ "$MODE" = jetson ]; then :; else
-    say "Jetson drive server not reachable (USB 192.168.55.1 or $JETSON_IP), using the mock robot."
+    say "!!! BUTTER NOT REACHABLE (USB 192.168.55.1 or $JETSON_IP). Using the PRETEND robot: the wheels will NOT move. !!!"
     say "(Start it on the Jetson with: ~/Projects/butter-drive/run.sh)"
     MODE=mock
   fi
