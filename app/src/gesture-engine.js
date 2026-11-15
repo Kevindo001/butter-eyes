@@ -19,8 +19,8 @@ const OPEN_EYE_BLINK_MS = 350;
 const LEAD_MS = 70; // in an ordinary blink one eye can lead the other by a few tens of ms
 
 export const GESTURES = ['DOUBLE_BLINK', 'WINK_LEFT', 'WINK_RIGHT', 'HOLD_LEFT', 'HOLD_RIGHT', 'BROW_HOLD', 'BOTH_CLOSED'];
-export const BROW_TAP_MIN_MS = 120, BROW_SELECT_MS = 1000; // quick eyebrow raise = next, 1 s hold = select
-export const BROW_MOVE_MS = 200, BROW_MOVE_ON = 0.6;  // Drive: eyebrows up this long = start moving; down = stop
+export const BROW_TAP_MIN_MS = 90, BROW_SELECT_MS = 1000; // quick eyebrow raise = next, 1 s hold = select
+export const BROW_MOVE_MS = 200, BROW_MOVE_ON = 0.45;  // Drive: eyebrows up this long = start moving; down = stop
 const LOOK_ON = 0.45, LOOK_OFF = 0.25; // fraction of the way to the calibration spot
 const DEFAULT_GAZE = { center: 0, left: 0.25 };
 export const LONG_BLINK_MS = 500; // a deliberate long blink: used only as a quick stop while driving
@@ -33,9 +33,9 @@ export const DEFAULT_PARAMS = {
   winkMinMs: 130,
   holdMs: 800,
   graceMs: 90,                 // tolerate a few noisy frames inside a wink
-  dbl: { closeMinMs: 250, closeMaxMs: 650, gapMaxMs: 600, quietMs: 250 }, // two slow blinks, each longer than a natural blink
+  dbl: { closeMinMs: 250, closeMaxMs: 800, gapMaxMs: 700, quietMs: 250 }, // two slow blinks, each longer than a natural blink
   bothMs: 3000,
-  brow: { on: 0.45, off: 0.3, ms: 4000 },
+  brow: { on: 0.33, off: 0.22, ms: 4000 }, // fraction of the way from resting to this person's full raise
   refractoryMs: 450,
   faceLostMs: 400,
   enabled: Object.fromEntries(GESTURES.map((g) => [g, true])),
@@ -54,7 +54,11 @@ export class GestureEngine {
     this.p = cal ? { ...DEFAULT_PARAMS, ...cal.params, enabled: { ...DEFAULT_PARAMS.enabled, ...(cal.params?.enabled || {}) } } : DEFAULT_PARAMS;
     // how long things must be held is a product decision, not something measured per person:
     // always use the current values, even with an older saved calibration
-    if (cal) this.p = { ...this.p, winkMinMs: DEFAULT_PARAMS.winkMinMs, bothMs: DEFAULT_PARAMS.bothMs, brow: { ...this.p.brow, ms: DEFAULT_PARAMS.brow.ms } };
+    // The same goes for how firm a raise or how slow a blink has to be. A double blink may be a
+    // little quicker than the calibrated "slow blink" length (25 ms under it, never below 175 ms):
+    // in simulation that catches ordinary deliberate double blinks with no false ones from blinking.
+    if (cal) this.p = { ...this.p, winkMinMs: DEFAULT_PARAMS.winkMinMs, bothMs: DEFAULT_PARAMS.bothMs, brow: { ...DEFAULT_PARAMS.brow },
+      dbl: { ...DEFAULT_PARAMS.dbl, closeMinMs: Math.max(175, (this.p.dbl?.closeMinMs ?? DEFAULT_PARAMS.dbl.closeMinMs) - 25) } };
   }
 
   // call when the user is looking straight ahead (e.g. on opening Drive)
